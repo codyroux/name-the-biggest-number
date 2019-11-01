@@ -21,3 +21,5 @@ A few base rules:
 - Submittions are made by making a PR that adds to the file `Contender.v`, according to the format outlined by that file (your number should be a definition named `contender_N`, and the proof of soundness `contender_(N-1)_lt_contender_N`.
 
 - No shennanigans! Though I might have an honorable mention category if you can really fool me.
+
+- Currently the definition and proof should build with Coq version 8.9.1, but I'll update this on request.
