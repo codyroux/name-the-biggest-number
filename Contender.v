@@ -152,62 +152,104 @@ Proof.
   reflexivity.
 Qed.
 
-Lemma inner_mon : forall f n n' a b,
-    (forall n n', n <= n' -> f n <= f n')
-    -> 2 <= n <= n'
-    -> inner f n a b <= inner f n' a b.
-Proof.
-  induction b; simpl.
-  intros f_mon.
-  case n; simpl; try lia.
-  case n'; simpl; try lia.
-  intro n0; case n0; intros; simpl; try lia.
-  intros.
-  revert H.
-  case n0; case n1; intros; lia.
+Definition mon (f : nat -> nat) := forall n m, n <= m -> f n <= f m.
 
-  intros f_mon leq.
-  apply f_mon.
-  apply IHb; try lia; auto.
+Definition gtS (f : nat -> nat) := forall n, S n <= f n.
+
+Lemma inner_mon_b : forall f n a b b',
+    mon f
+    -> gtS f
+    -> 2 <= n
+    -> b <= b'
+    -> inner f n a b <= inner f n a b'.
+Proof.
+  intros f n a b; induction b; simpl.
+  - intros b' _ gtS_f le _.
+    repeat (case n as [|n]; simpl; [ lia |]).
+    induction b' as [|b' IH]; simpl; [lia|].
+    transitivity (S ((inner f (S (S n)) a b'))).
+    + lia.
+    + now apply gtS_f.
+  - intros b' mon_f gtS_f le_n le_b.
+    case b' as [|b']; [lia|].
+    simpl.
+    apply mon_f.
+    apply IHb; [auto | auto | auto | try lia].
+Qed.
+  
+
+Lemma inner_mon : forall f b b' n n' a,
+    mon f
+    -> 2 <= n <= n'
+    -> b <= b'
+    -> inner f n a b <= inner f n' a b'.
+Proof.
+  
+  (* intros f. *)
+  (* induction b; simpl. *)
+  (* intros b' n n' a f_mon. *)
+  (* case n; simpl; try lia. *)
+  (* case n'; simpl; try lia. *)
+  (* intro n0; case n0; intros; simpl; try lia. *)
+  (* intros n0 n1 H. *)
+  (* revert H. *)
+  (* case n0; case n1; case b'; simpl; intros; try lia. *)
+
+  (* intros n n' a f_mon leq. *)
+  (* apply f_mon. *)
+  (* apply IHb; try lia; auto. *)
 Qed.
 
 Lemma inner_ge_arg : forall f n,
     (forall n, S n <= f n) ->
-    (forall n m, n <= m -> f n <= f m) ->
+    mon f ->
     2 <= n ->
     forall b a,
     b <= inner f n a b.
 Proof.
-  intros.
-  induction b; simpl.
-  - SearchAbout (_ <= _ \/ _).
-    revert H1.
-    case n; [lia| intro n'; case n'; [lia| now auto]].
-  - transitivity (S (inner f n a b)).
-    + SearchAbout (S _ <= S _).
-      apply le_n_S.
-      now auto.
-    + apply H.
+  (* intros. *)
+  (* induction b; simpl. *)
+  (* - SearchAbout (_ <= _ \/ _). *)
+  (*   revert H1. *)
+  (*   case n; [lia| intro n'; case n'; [lia| now auto]]. *)
+  (* - transitivity (S (inner f n a b)). *)
+  (*   + SearchAbout (S _ <= S _). *)
+  (*     apply le_n_S. *)
+  (*     now auto. *)
+  (*   + apply H. *)
 Qed.
 
 Lemma inner_ge_f_arg : forall f n,
     (forall n, S n <= f n) ->
-    (forall n m, n <= m -> f n <= f m) ->
+    mon f ->
     2 <= n ->
-    forall b a,
-    f b <= inner f n a (S b).
+    forall a b b',
+      b' <= b ->
+      f b' <= inner f n a (S b).
 Proof.
-  intros.
-  simpl.
-  apply H0.
-  apply inner_ge_arg; auto.
+  (* intros f n gt_f_S mon_f gt_2 a b b' le_b. *)
+  (* simpl. *)
+  (* apply mon_f. *)
+  (* rewrite le_b. *)
+  (* apply inner_ge_arg; intros; auto. *)
 Qed.
 
 Lemma ack_gt_S_b : forall n b a,
     1 < a -> S b <= ack n a b.
 Proof.
 Admitted.
+
+Lemma mon_ack_b : forall n a,
+    mon (ack n a).
+Proof.
+  (* induction n; simpl. *)
+  (* - intros. *)
+  (*   intros n m le. *)
+  (*   lia. *)
+  (* - intros a m k le. *)
     
+  (*   apply inner_mon. *)
+Admitted.  
 
 Lemma ack_mon : forall n a b n' a' b',
     n' < n -> 1 < a' < a -> 1 < b' < b -> ack n' a' b' < ack n a b.
@@ -217,9 +259,22 @@ Proof.
   assert (H2 : forall b, S b <= ack n a b).
   - intros.
     apply ack_gt_S_b; lia.
-  - 
+  - replace (ack n' a' b' < inner (ack n a) n a b) with (ack n' a' b' <= inner (ack n a) n a b).
+    destruct b; [lia|].
+    replace (ack n' a' b') with (ack n a b).
+    apply inner_ge_f_arg.
+    intros; auto.
+    unfold mon.
+    induction m; simpl.
+    intros.
+    
+    Check inner_ge_f_arg.
     generalize (inner_ge_f_arg (ack n a) n H2).
     intros.
+    SearchAbout (_ < _ -> _ <=_ -> _ < _).
+    (* simpl in H3. *)
+    eapply Nat.le_lt_trans.
+    apply H3.
     fail.
 
 
