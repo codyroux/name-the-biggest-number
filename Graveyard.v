@@ -41,3 +41,61 @@ Time Qed.
       - Definition time was something like 2 seconds
       - Proof script and Qed time altogether were less than a minute, roughly 50 seconds.
 *)
+
+(* This is the current contender for largest number *)
+(* Submitted by codyroux *)
+
+(* This is a fun trick *)
+Opaque Nat.pow.
+
+Definition tower_of_power (n : nat) : nat :=
+  Nat.recursion 42 (fun _ k => 42 ^ k) n.
+
+Ltac depth t :=
+  match constr:(t) with
+  | 42 => constr:(0)
+  | ?x ^ ?y =>
+    let d := depth y in
+    constr:(S d)
+  | _ => fail
+  end.
+
+Ltac reify_tower t :=
+  match constr:(t) with
+  | _ ^ _ =>
+    let d := depth t in
+    constr:(tower_of_power d)
+  | _ => fail
+  end.
+
+Ltac reify_goal :=
+  match goal with
+  | [ |- ?x < ?y ] =>
+    let t := (reify_tower x) in
+    replace x with t by reflexivity
+  end.
+
+Definition contender_3 := tower_of_power 10000.
+
+Lemma fund_lemma : forall n m, n < m -> tower_of_power n < tower_of_power m.
+Proof.
+  intros.
+  induction H.
+  - simpl.
+    apply Nat.pow_gt_lin_r; lia.
+  - simpl.
+    assert (42 ^ tower_of_power n < 42 ^ tower_of_power m) by (apply Nat.pow_lt_mono_r; lia).
+    eapply Nat.lt_trans; [exact IHle|].
+    apply Nat.pow_gt_lin_r; lia.
+Qed.
+    
+   
+
+Theorem contender_2_lt_contender_3 : contender_2 < contender_3.
+Proof.
+  unfold contender_2.
+  Time reify_goal.
+  unfold contender_3.
+  apply fund_lemma.
+  compute; lia.
+Qed.
