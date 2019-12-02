@@ -36,10 +36,10 @@ Fixpoint type_eqb(t1 t2: type): bool :=
   | _, _ => false
   end.
 
-Fixpoint type_size(t: type): nat :=
+Fixpoint type_depth(t: type): nat :=
   match t with
   | tpNat => 1
-  | tpArr t1 t2 => S (type_size t1 + type_size t2)
+  | tpArr t1 t2 => S (max (type_depth t1) (type_depth t2))
   end.
 
 Fixpoint interp_type(tp: type): Type :=
@@ -56,16 +56,16 @@ Inductive term :=
 | tS
 | tNatRec(R: type).
 
-Definition nat_size(n: nat) := S n.
+Definition nat_depth(n: nat) := S n.
 
-Fixpoint term_size(t: term): nat :=
+Fixpoint term_depth(t: term): nat :=
   match t with
-  | tVar x => S (nat_size x)
-  | tLam A B body => S (type_size A + type_size B + term_size body)
-  | tApp t1 t2 => S (term_size t1 + term_size t2)
+  | tVar x => S (nat_depth x)
+  | tLam A B body => S (max (max (type_depth A) (type_depth B)) (term_depth body))
+  | tApp t1 t2 => S (max (term_depth t1) (term_depth t2))
   | tO => 1
   | tS => 1
-  | tNatRec R => S (type_size R)
+  | tNatRec R => S (type_depth R)
   end.
 
 Definition lookup{T}(e: list T)(n: nat): option T :=
@@ -80,14 +80,14 @@ Definition error{tp: type}: interp_type tp.
   revert tp.
   refine (fix rec tp := _).
   destruct tp; simpl.
-  - exact 42.
+  - exact 0.
   - intros _. apply rec.
 Defined.
 
 Definition cast_error(from to: type):
   ((interp_type from -> interp_type to) * (interp_type to -> interp_type from)).
   split; intros; exact error.
-Qed.
+Defined.
 
 Definition cast_impl(from to: type):
   ((interp_type from -> interp_type to) * (interp_type to -> interp_type from)).
@@ -160,11 +160,11 @@ Fixpoint typesUpTo(n: nat): list type :=
   end.
 
 Lemma typesUpTo_correct: forall n t,
-    type_size t <= n ->
-    List.In t (typesUpTo n).
+    type_depth t <= n <-> List.In t (typesUpTo n).
 Proof.
-  induction n; intros.
+  induction n; intros; split; intros.
   - destruct t; simpl in *; lia.
+  - simpl in *. contradiction.
   - simpl. destruct t; [auto|].
     right. simpl in *.
     match goal with
@@ -172,6 +172,17 @@ Proof.
     end.
     apply in_map.
     apply in_prod; eapply IHn; lia.
+  - simpl in *. destruct H.
+    + subst. simpl. lia.
+    + apply in_map_iff in H.
+      destruct H as [[t1 t2] [? H]].
+      subst t.
+      apply in_prod_iff in H.
+      destruct H as [H1 H2].
+      pose proof ((proj2 (IHn _)) H1).
+      pose proof ((proj2 (IHn _)) H2).
+      simpl.
+      lia.
 Qed.
 
 Fixpoint natsUpTo(n: nat): list nat :=
@@ -181,12 +192,15 @@ Fixpoint natsUpTo(n: nat): list nat :=
   end.
 
 Lemma natsUpTo_correct: forall n m,
-    nat_size m <= n ->
-    List.In m (natsUpTo n).
+    nat_depth m <= n <-> List.In m (natsUpTo n).
 Proof.
-  induction n; intros; unfold nat_size in *.
+  induction n; intros; unfold nat_depth in *; split; intros; simpl in *.
   - exfalso. lia.
-  - simpl. assert (n = m \/ S m <= n) as C by lia. destruct C as [C | C]; auto.
+  - contradiction.
+  - assert (n = m \/ S m <= n) as C by lia. destruct C as [C | C]; firstorder idtac.
+  - destruct H.
+    + lia.
+    + specialize (IHn m). apply proj2 in IHn. specialize (IHn H). lia.
 Qed.
 
 Fixpoint termsUpTo(n: nat): list term :=
@@ -203,11 +217,11 @@ Fixpoint termsUpTo(n: nat): list term :=
   end.
 
 Lemma termsUpTo_correct: forall n t,
-    term_size t <= n ->
-    List.In t (termsUpTo n).
+    term_depth t <= n <-> List.In t (termsUpTo n).
 Proof.
-  induction n; intros.
+  induction n; intros; split; intros.
   - destruct t; simpl in *; lia.
+  - simpl in *. contradiction.
   - destruct t; simpl in *.
     + do 0 (apply in_or_app; right). apply in_or_app; left.
       apply in_map. apply natsUpTo_correct. lia.
@@ -218,9 +232,9 @@ Proof.
       repeat first
              [ apply in_map
              | apply in_prod
-             | apply natsUpTo_correct
-             | apply typesUpTo_correct
-             | apply IHn
+             | apply (proj1 (natsUpTo_correct _ _))
+             | apply (proj1 (typesUpTo_correct _ _))
+             | apply (proj1 (IHn _))
              | lia].
     + do 2 (apply in_or_app; right). apply in_or_app; left.
       match goal with
@@ -229,9 +243,9 @@ Proof.
       repeat first
              [ apply in_map
              | apply in_prod
-             | apply natsUpTo_correct
-             | apply typesUpTo_correct
-             | apply IHn
+             | apply (proj1 (natsUpTo_correct _ _))
+             | apply (proj1 (typesUpTo_correct _ _))
+             | apply (proj1 (IHn _))
              | lia].
     + do 3 (apply in_or_app; right). simpl. auto.
     + do 3 (apply in_or_app; right). simpl. auto.
@@ -239,10 +253,43 @@ Proof.
       repeat first
              [ apply in_map
              | apply in_prod
-             | apply natsUpTo_correct
-             | apply typesUpTo_correct
-             | apply IHn
+             | apply (proj1 (natsUpTo_correct _ _))
+             | apply (proj1 (typesUpTo_correct _ _))
+             | apply (proj1 (IHn _))
              | lia].
+  - simpl in *.
+    repeat ((simpl in H || apply in_app_iff in H || idtac); destruct H).
+    + apply in_map_iff in H.
+      destruct H as [x [? H]].
+      subst t.
+      pose proof ((proj2 (natsUpTo_correct _ _)) H).
+      simpl.
+      lia.
+    + apply in_map_iff in H.
+      destruct H as [[[A B] body] [? H]].
+      subst t.
+      repeat (apply in_prod_iff in H; destruct H).
+      pose proof ((proj2 (typesUpTo_correct _ _)) H).
+      pose proof ((proj2 (typesUpTo_correct _ _)) H1).
+      pose proof ((proj2 (IHn _)) H0).
+      simpl.
+      lia.
+    + apply in_map_iff in H.
+      destruct H as [[t1 t2] [? H]].
+      subst t.
+      repeat (apply in_prod_iff in H; destruct H).
+      pose proof ((proj2 (IHn _)) H).
+      pose proof ((proj2 (IHn _)) H0).
+      simpl.
+      lia.
+    + simpl. lia.
+    + simpl. lia.
+    + apply in_map_iff in H.
+      destruct H as [R [? H]].
+      subst t.
+      pose proof ((proj2 (typesUpTo_correct _ _)) H).
+      simpl.
+      lia.
 Qed.
 
 Definition eval(t : term): nat :=
@@ -252,18 +299,37 @@ Definition eval(t : term): nat :=
   | tpArr tp1 tp2 => fun (res: interp_type (tpArr tp1 tp2)) => 0
   end res.
 
-Fixpoint listmax_impl(currentMax: nat)(l: list nat): nat :=
+Fixpoint maxBy{T: Type}(f: T -> nat)(currentMax: nat)(currentBest: T)(l: list T): T :=
   match l with
-  | nil => currentMax
-  | cons h t => listmax_impl (max h currentMax) t
+  | nil => currentBest
+  | cons h t =>
+    if currentMax <? (f h) then
+      maxBy f (f h) h t
+    else
+      maxBy f currentMax currentBest t
   end.
 
-Definition listmax: list nat -> nat := listmax_impl 0.
+Definition largest_of_depth(n: nat): term := maxBy eval 0 tO (termsUpTo n).
 
-Definition largest_STLCNatRec_nat_of_size(n: nat): nat :=
-  listmax (List.map eval (termsUpTo n)).
+Eval vm_compute in (largest_of_depth 1).
+Eval vm_compute in (largest_of_depth 2).
+Eval vm_compute in (largest_of_depth 3).
+Eval vm_compute in (largest_of_depth 4).
 
-Definition contender_5: nat := largest_STLCNatRec_nat_of_size 222.
+Definition largest_STLCNatRec_nat_of_depth(n: nat): nat := eval (largest_of_depth n).
+
+(* Small examples are computable: *)
+Eval vm_compute in (largest_STLCNatRec_nat_of_depth 1).
+Eval vm_compute in (largest_STLCNatRec_nat_of_depth 2).
+Eval vm_compute in (largest_STLCNatRec_nat_of_depth 3).
+Eval vm_compute in (largest_STLCNatRec_nat_of_depth 4).
+(* but as soon as it would get interesting, it becomes too inefficient *)
+
+
+(* This is the current contender for largest number *)
+(* Submitted by samuelgruetter *)
+(* <brag>Note how its definition does not require any large literals</brag> ;-) *)
+Definition contender_5: nat := largest_STLCNatRec_nat_of_depth 42.
 
 
 (* Reification automation: *)
@@ -485,6 +551,27 @@ Proof.
   - rewrite <- IHn. reflexivity.
 Qed.
 
+Definition mul': nat -> nat -> nat :=
+  Nat.recursion (fun (m: nat) => 0)
+                (fun (pred: nat) (rec: nat -> nat) (m: nat) => add' m (rec m)).
+
+Lemma mul'_equiv: forall n m, mul' n m = Nat.mul n m.
+Proof.
+  induction n; intros; simpl.
+  - reflexivity.
+  - rewrite <- IHn. rewrite add'_equiv. reflexivity.
+Qed.
+
+Definition pow'(n: nat): nat -> nat :=
+  Nat.recursion 1 (fun (pred: nat) (rec: nat) => mul' n rec).
+
+Lemma pow'_equiv: forall n m, pow' n m = Nat.pow n m.
+Proof.
+  induction m; intros; simpl.
+  - reflexivity.
+  - rewrite <- IHm. rewrite mul'_equiv. reflexivity.
+Qed.
+
 Lemma ack'_equiv: forall n a b, ack' n a b = ack n a b.
 Proof.
   induction n; intros; simpl.
@@ -516,10 +603,183 @@ Defined.
 Lemma interp_ack_reified: projT2 (interp_term nil ack_reified) = ack'.
 Proof. reflexivity. Qed.
 
-Eval cbv in (term_size ack_reified).
+Eval cbv in (term_depth ack_reified).
+
+Definition contender_4': nat.
+  let r := eval unfold pow', mul', add' in (ack' 5 (mul' 6 7) (S (S (pow' 10 4)))) in exact r.
+Defined.
+
+Lemma f_equal_ack'_equiv: forall n a b1 b2 : nat,
+    b1 = b2 ->
+    ack' n a b1 = ack n a b2.
+Proof.
+  intros.
+  rewrite ack'_equiv.
+  f_equal.
+  assumption.
+Qed.
+
+Lemma contender_4'_equiv: contender_4' = contender_4.
+Proof.
+  unfold contender_4', contender_4.
+  apply f_equal_ack'_equiv.
+  vm_compute.
+  reflexivity.
+Qed.
+
+Definition contender_4'': nat.
+  let r := eval unfold contender_4', ack' in contender_4' in exact r.
+Defined.
+
+Lemma contender_4''_equiv: contender_4'' = contender_4.
+Proof.
+  etransitivity. 2: exact contender_4'_equiv.
+  unfold contender_4'', contender_4'.
+  unfold ack'.
+  repeat apply f_equal.
+  reflexivity.
+Qed.
+
+Lemma contender_4''_reification_helper: exists res,
+    interp_term nil res
+    = existT _ tpNat contender_4''.
+Proof.
+  eexists.
+  unfold contender_4''.
+  repeat t.
+  all: reflexivity.
+Defined.
+
+Definition contender_4''_reified: term.
+  let r := eval unfold contender_4''_reification_helper in contender_4''_reification_helper in
+  match r with
+  | ex_intro _ ?x _ => exact x
+  end.
+Defined.
+
+Lemma interp_contender_4''_reified:
+  projT2 (interp_term nil contender_4''_reified) = contender_4''.
+Proof.
+  cbv -[Nat.recursion].
+  repeat apply f_equal.
+  reflexivity.
+Qed.
+
+Lemma eval_contender_4''_reified:
+  eval contender_4''_reified = contender_4''.
+Proof.
+  unfold eval.
+  cbv -[Nat.recursion].
+  repeat apply f_equal.
+  reflexivity.
+Qed.
+
+Eval cbv in (term_depth contender_4''_reified).
+
 
 (* Proving that the new contender is bigger than the previous one: *)
 
+Lemma maxBy_In{T: Type}: forall f (l: list T) currentMax currentBest,
+    currentMax = f currentBest ->
+    List.In (maxBy f currentMax currentBest l) l \/ maxBy f currentMax currentBest l = currentBest.
+Proof.
+  induction l; intros.
+  - simpl. auto.
+  - subst. simpl in *.
+    destruct (f currentBest <? f a) eqn: E.
+    + specialize (IHl (f a) _ eq_refl). firstorder congruence.
+    + specialize (IHl (f currentBest) _ eq_refl). firstorder congruence.
+Qed.
+
+Lemma maxBy_at_least_currentMax{T: Type}: forall (f: T -> nat) l currentMax currentBest,
+    f currentBest = currentMax ->
+    currentMax <= f (maxBy f currentMax currentBest l).
+Proof.
+  induction l; intros; simpl in *.
+  - lia.
+  - subst. destruct (f currentBest <? f a) eqn: E.
+    + apply Nat.ltb_lt in E.
+      specialize (IHl (f a) _ eq_refl).
+      lia.
+    + apply Nat.ltb_ge in E.
+      eapply IHl.
+      reflexivity.
+Qed.
+
+Lemma lowerbound_maxBy{T: Type}: forall (f: T -> nat) x l currentMax currentBest,
+    List.In x l ->
+    f currentBest = currentMax ->
+    f x <= f (maxBy f currentMax currentBest l).
+Proof.
+  induction l; intros; simpl in *.
+  - contradiction.
+  - destruct H.
+    + subst.
+      destruct (f currentBest <? f x) eqn: E.
+      * apply Nat.ltb_lt in E.
+        eapply maxBy_at_least_currentMax.
+        reflexivity.
+      * apply Nat.ltb_ge in E.
+        eapply Nat.le_trans. 1: eassumption.
+        eapply maxBy_at_least_currentMax.
+        reflexivity.
+    + subst.
+      destruct (f currentBest <? f a) eqn: E.
+      * apply Nat.ltb_lt in E.
+        eauto.
+      * apply Nat.ltb_ge in E.
+        eauto.
+Qed.
+
+Lemma upperbound_eval: forall t,
+    eval t <= eval (largest_of_depth (term_depth t)).
+Proof.
+  intros. unfold largest_of_depth.
+  eapply Nat.le_trans. 2: {
+    eapply lowerbound_maxBy with (x := t). 2: reflexivity.
+    eapply termsUpTo_correct.
+    lia.
+  }
+  lia.
+Qed.
+
+Lemma maxBy_monotone{T: Type}: forall f (l1 l2: list T) currentMax currentBest,
+    (forall x, In x l1 -> In x l2) ->
+    f currentBest = currentMax ->
+    f (maxBy f currentMax currentBest l1) <= f (maxBy f currentMax currentBest l2).
+Proof.
+  intros. subst.
+  pose proof (maxBy_In f l1 (f currentBest) _ eq_refl) as P.
+  destruct P as [P | P].
+  - specialize (H _ P).
+    eapply lowerbound_maxBy. 1: exact H. reflexivity.
+  - rewrite P. eapply maxBy_at_least_currentMax. reflexivity.
+Qed.
+
+Lemma largest_of_depth_monotone: forall n1 n2,
+    n1 <= n2 ->
+    eval (largest_of_depth n1) <= eval (largest_of_depth n2).
+Proof.
+  intros.
+  unfold largest_of_depth.
+  eapply (maxBy_monotone eval (termsUpTo n1) (termsUpTo n2)). 2: reflexivity.
+  intros.
+  eapply termsUpTo_correct.
+  eapply termsUpTo_correct in H0.
+  eapply Nat.le_trans; eassumption.
+Qed.
+
 Theorem contender_4_lt_contender_5 : contender_4 < contender_5.
 Proof.
-Admitted.
+  rewrite <- contender_4''_equiv.
+  rewrite <- eval_contender_4''_reified.
+  unfold contender_5, largest_STLCNatRec_nat_of_depth.
+  replace lt with le by admit. (* almost, still need strict inequality *)
+  eapply Nat.le_trans. 1: eapply upperbound_eval.
+  eapply largest_of_depth_monotone.
+  cbv.
+  lia.
+
+Qed.
+
+Print Assumptions contender_4_lt_contender_5.
