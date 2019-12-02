@@ -36,6 +36,12 @@ Fixpoint type_eqb(t1 t2: type): bool :=
   | _, _ => false
   end.
 
+Fixpoint type_size(t: type): nat :=
+  match t with
+  | tpNat => 1
+  | tpArr t1 t2 => S (type_size t1 + type_size t2)
+  end.
+
 Fixpoint interp_type(tp: type): Type :=
   match tp with
   | tpNat => nat
@@ -49,6 +55,18 @@ Inductive term :=
 | tO
 | tS
 | tNatRec(R: type).
+
+Definition nat_size(n: nat) := S n.
+
+Fixpoint term_size(t: term): nat :=
+  match t with
+  | tVar x => S (nat_size x)
+  | tLam A B body => S (type_size A + type_size B + term_size body)
+  | tApp t1 t2 => S (term_size t1 + term_size t2)
+  | tO => 1
+  | tS => 1
+  | tNatRec R => S (type_size R)
+  end.
 
 Definition lookup{T}(e: list T)(n: nat): option T :=
   let l := List.length e in if l <=? n then None else nth_error e (l - S n).
@@ -133,7 +151,119 @@ Defined.
 
 (* Defining the new contender: *)
 
-Definition contender_5: nat. Admitted.
+Fixpoint typesUpTo(n: nat): list type :=
+  match n with
+  | O => []
+  | S m =>
+    let r := typesUpTo m in
+    tpNat :: List.map (fun '(t1, t2) => tpArr t1 t2) (list_prod r r)
+  end.
+
+Lemma typesUpTo_correct: forall n t,
+    type_size t <= n ->
+    List.In t (typesUpTo n).
+Proof.
+  induction n; intros.
+  - destruct t; simpl in *; lia.
+  - simpl. destruct t; [auto|].
+    right. simpl in *.
+    match goal with
+    | |- In ?e (map ?f _) => change e with (f (t1, t2))
+    end.
+    apply in_map.
+    apply in_prod; eapply IHn; lia.
+Qed.
+
+Fixpoint natsUpTo(n: nat): list nat :=
+  match n with
+  | O => []
+  | S m => m :: natsUpTo m
+  end.
+
+Lemma natsUpTo_correct: forall n m,
+    nat_size m <= n ->
+    List.In m (natsUpTo n).
+Proof.
+  induction n; intros; unfold nat_size in *.
+  - exfalso. lia.
+  - simpl. assert (n = m \/ S m <= n) as C by lia. destruct C as [C | C]; auto.
+Qed.
+
+Fixpoint termsUpTo(n: nat): list term :=
+  match n with
+  | O => []
+  | S m =>
+    List.map tVar (natsUpTo m) ++
+    List.map (fun '(A, B, body) => tLam A B body)
+             (list_prod (list_prod (typesUpTo m) (typesUpTo m)) (termsUpTo m)) ++
+    List.map (fun '(t1, t2) => tApp t1 t2)
+             (list_prod (termsUpTo m) (termsUpTo m)) ++
+    [tO] ++ [tS] ++
+    List.map tNatRec (typesUpTo m)
+  end.
+
+Lemma termsUpTo_correct: forall n t,
+    term_size t <= n ->
+    List.In t (termsUpTo n).
+Proof.
+  induction n; intros.
+  - destruct t; simpl in *; lia.
+  - destruct t; simpl in *.
+    + do 0 (apply in_or_app; right). apply in_or_app; left.
+      apply in_map. apply natsUpTo_correct. lia.
+    + do 1 (apply in_or_app; right). apply in_or_app; left.
+      match goal with
+      | |- In ?e (map ?f _) => change e with (f (A, B, t))
+      end.
+      repeat first
+             [ apply in_map
+             | apply in_prod
+             | apply natsUpTo_correct
+             | apply typesUpTo_correct
+             | apply IHn
+             | lia].
+    + do 2 (apply in_or_app; right). apply in_or_app; left.
+      match goal with
+      | |- In ?e (map ?f _) => change e with (f (t1, t2))
+      end.
+      repeat first
+             [ apply in_map
+             | apply in_prod
+             | apply natsUpTo_correct
+             | apply typesUpTo_correct
+             | apply IHn
+             | lia].
+    + do 3 (apply in_or_app; right). simpl. auto.
+    + do 3 (apply in_or_app; right). simpl. auto.
+    + do 3 (apply in_or_app; right). simpl. right. right.
+      repeat first
+             [ apply in_map
+             | apply in_prod
+             | apply natsUpTo_correct
+             | apply typesUpTo_correct
+             | apply IHn
+             | lia].
+Qed.
+
+Definition eval(t : term): nat :=
+  let (tp, res) := interp_term nil t in
+  match tp as t0 return (interp_type t0 -> nat) with
+  | tpNat         => fun (res: interp_type tpNat) => res
+  | tpArr tp1 tp2 => fun (res: interp_type (tpArr tp1 tp2)) => 0
+  end res.
+
+Fixpoint listmax_impl(currentMax: nat)(l: list nat): nat :=
+  match l with
+  | nil => currentMax
+  | cons h t => listmax_impl (max h currentMax) t
+  end.
+
+Definition listmax: list nat -> nat := listmax_impl 0.
+
+Definition largest_STLCNatRec_nat_of_size(n: nat): nat :=
+  listmax (List.map eval (termsUpTo n)).
+
+Definition contender_5: nat := largest_STLCNatRec_nat_of_size 222.
 
 
 (* Reification automation: *)
@@ -386,6 +516,7 @@ Defined.
 Lemma interp_ack_reified: projT2 (interp_term nil ack_reified) = ack'.
 Proof. reflexivity. Qed.
 
+Eval cbv in (term_size ack_reified).
 
 (* Proving that the new contender is bigger than the previous one: *)
 
