@@ -20,61 +20,10 @@ Fixpoint ack (n a b : nat) :=
 Definition contender_4 := ack 5 42 10002.
 
 
-Definition ack'(n: nat): nat -> nat -> nat :=
-  Nat.recursion
-    (fun a b => S b)
-    (fun (pred0: nat) (rec0: nat -> nat -> nat) =>
-       Nat.recursion
-         (Nat.recursion (fun (m: nat) => m)
-                        (fun (pred: nat) (rec: nat -> nat) (m: nat) => S (rec m)))
-         (fun (pred: nat) (rec: nat -> nat -> nat) =>
-            (fun a b => Nat.recursion 1 (fun pred1 rec1 => rec a rec1) b))
-         pred0)
-    n.
-
-Lemma iter_proper: forall f1 f2,
-    (forall x, f1 x = f2 x) ->
-    forall b, iter f1 b = iter f2 b.
-Proof.
-  induction b.
-  - reflexivity.
-  - simpl. rewrite IHb. apply H.
-Qed.
-
-Definition iter' (f : nat -> nat) : nat -> nat :=
-  Nat.recursion 1 (fun (pred: nat) (rec: nat) => f rec).
-
-Lemma iter'_equiv: forall f b, iter' f b = iter f b.
-Proof. induction b; intros; simpl; congruence. Qed.
-
-Definition add': nat -> nat -> nat :=
-  Nat.recursion (fun (m: nat) => m) (fun (pred: nat) (rec: nat -> nat) (m: nat) => S (rec m)).
-
-Lemma add'_equiv: forall n m, add' n m = Nat.add n m.
-Proof.
-  induction n; intros; simpl.
-  - reflexivity.
-  - rewrite <- IHn. reflexivity.
-Qed.
-
-Lemma ack'_equiv: forall n a b, ack' n a b = ack n a b.
-Proof.
-  induction n; intros; simpl.
-  - reflexivity.
-  - destruct n.
-    + simpl. apply add'_equiv.
-    + specialize (IHn a).
-      rewrite <- (iter_proper _ _ IHn).
-      rewrite <- iter'_equiv. reflexivity.
-Qed.
+Require Import List. Import ListNotations.
 
 
-Notation "' x <- a ; f" :=
-  (match (a: option _) with
-   | x => f
-   | _ => None
-   end)
-  (right associativity, at level 70, x pattern).
+(* Definition of the language STLC+NatRec: *)
 
 Inductive type :=
 | tpNat: type
@@ -92,8 +41,6 @@ Fixpoint interp_type(tp: type): Type :=
   | tpNat => nat
   | tpArr t1 t2 => (interp_type t1) -> (interp_type t2)
   end.
-
-Require Import List. Import ListNotations.
 
 Inductive term :=
 | tVar(x: nat) (* 0 = last element of the env, ie the outermost binder (reversed DeBruijn) *)
@@ -183,6 +130,14 @@ Definition interp_term: forall (e: list {tp: type & interp_type tp}) (t: term),
     exact (existT _ (tpArr R (tpArr (tpArr tpNat (tpArr R R)) (tpArr tpNat R))) r).
 Defined.
 
+
+(* Defining the new contender: *)
+
+Definition contender_5: nat. Admitted.
+
+
+(* Reification automation: *)
+
 Definition type_eq_dec: forall x y : type, {x = y} + {x <> y}.
   induction x; destruct y eqn: E; intros; simpl.
   - left. reflexivity.
@@ -207,6 +162,7 @@ Proof.
   - rewrite IHt1, IHt2. reflexivity.
 Qed.
 
+(* only for the reification machinery, will not show up in the final proof *)
 Require Import FunctionalExtensionality.
 
 Lemma cast_impl_same: forall (B: type) (t: interp_type B),
@@ -359,6 +315,57 @@ Ltac t :=
           | eapply interp_tVar_tail; cbv [length]]
   end.
 
+
+(* Expressing contender_4 as an STLC+NatRec term: *)
+
+Definition ack'(n: nat): nat -> nat -> nat :=
+  Nat.recursion
+    (fun a b => S b)
+    (fun (pred0: nat) (rec0: nat -> nat -> nat) =>
+       Nat.recursion
+         (Nat.recursion (fun (m: nat) => m)
+                        (fun (pred: nat) (rec: nat -> nat) (m: nat) => S (rec m)))
+         (fun (pred: nat) (rec: nat -> nat -> nat) =>
+            (fun a b => Nat.recursion 1 (fun pred1 rec1 => rec a rec1) b))
+         pred0)
+    n.
+
+Lemma iter_proper: forall f1 f2,
+    (forall x, f1 x = f2 x) ->
+    forall b, iter f1 b = iter f2 b.
+Proof.
+  induction b.
+  - reflexivity.
+  - simpl. rewrite IHb. apply H.
+Qed.
+
+Definition iter' (f : nat -> nat) : nat -> nat :=
+  Nat.recursion 1 (fun (pred: nat) (rec: nat) => f rec).
+
+Lemma iter'_equiv: forall f b, iter' f b = iter f b.
+Proof. induction b; intros; simpl; congruence. Qed.
+
+Definition add': nat -> nat -> nat :=
+  Nat.recursion (fun (m: nat) => m) (fun (pred: nat) (rec: nat -> nat) (m: nat) => S (rec m)).
+
+Lemma add'_equiv: forall n m, add' n m = Nat.add n m.
+Proof.
+  induction n; intros; simpl.
+  - reflexivity.
+  - rewrite <- IHn. reflexivity.
+Qed.
+
+Lemma ack'_equiv: forall n a b, ack' n a b = ack n a b.
+Proof.
+  induction n; intros; simpl.
+  - reflexivity.
+  - destruct n.
+    + simpl. apply add'_equiv.
+    + specialize (IHn a).
+      rewrite <- (iter_proper _ _ IHn).
+      rewrite <- iter'_equiv. reflexivity.
+Qed.
+
 Lemma ack'_reification_helper: exists res,
     interp_term nil res
     = existT _ (tpArr tpNat (tpArr tpNat (tpArr tpNat tpNat))) ack'.
@@ -380,8 +387,7 @@ Lemma interp_ack_reified: projT2 (interp_term nil ack_reified) = ack'.
 Proof. reflexivity. Qed.
 
 
-Definition contender_5: nat. Admitted.
-
+(* Proving that the new contender is bigger than the previous one: *)
 
 Theorem contender_4_lt_contender_5 : contender_4 < contender_5.
 Proof.
