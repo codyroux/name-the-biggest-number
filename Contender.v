@@ -93,18 +93,23 @@ Fixpoint interp_type(tp: type): Type :=
   | tpArr t1 t2 => (interp_type t1) -> (interp_type t2)
   end.
 
-Require Import List String.
+Require Import List. Import ListNotations.
 
 Inductive term :=
-| tVar(x: string)
-| tLam(x: string)(A B: type)(body: term)
+| tVar(x: nat) (* 0 = last element of the env, ie the outermost binder (reversed DeBruijn) *)
+| tLam(A B: type)(body: term)
 | tApp(t1 t2: term)
 | tO
 | tS
 | tNatRec(R: type).
 
-Definition lookup{T}(e: list (string * T))(x: string): option T :=
-  'Some (_, t) <- List.find (fun '(y, t) => String.eqb x y) e; Some t.
+Definition lookup{T}(e: list T)(n: nat): option T :=
+  let l := List.length e in if l <=? n then None else nth_error e (l - S n).
+
+Goal lookup [10; 11; 12] 0 = Some 12. reflexivity. Qed.
+Goal lookup [10; 11; 12] 1 = Some 11. reflexivity. Qed.
+Goal lookup [10; 11; 12] 2 = Some 10. reflexivity. Qed.
+Goal lookup [10; 11; 12] 3 = None. reflexivity. Qed.
 
 Definition error{tp: type}: interp_type tp.
   revert tp.
@@ -147,12 +152,12 @@ Defined.
 Definition cast{from: type}(to: type): interp_type from -> interp_type to :=
   fst (cast_impl from to).
 
-Definition interp_term: forall (e: list (string * {tp: type & interp_type tp})) (t: term),
+Definition interp_term: forall (e: list {tp: type & interp_type tp}) (t: term),
     {tp: type & interp_type tp}.
   refine (fix rec e t {struct t} :=
   match t with
   | tVar x => _
-  | tLam x A B body => _
+  | tLam A B body => _
   | tApp t1 t2 => _
   | tO => _
   | tS => _
@@ -164,7 +169,7 @@ Definition interp_term: forall (e: list (string * {tp: type & interp_type tp})) 
   - refine (existT _ (tpArr A B) _).
     simpl.
     intro x'.
-    set (r := (projT2 (rec ((x, (existT _ A x')) :: e) body))).
+    set (r := (projT2 (rec ((existT _ A x') :: e) body))).
     simpl in r.
     exact (cast B r).
   - destruct (rec e t1) as [R1 r1] eqn: E1.
@@ -242,32 +247,46 @@ Lemma interp_tVar: forall e x (p: {tp: type & interp_type tp}),
     interp_term e (tVar x) = p.
 Proof. intros. simpl. rewrite H. reflexivity. Qed.
 
-Lemma interp_tVar_head: forall e x (p: {tp: type & interp_type tp}),
-    interp_term ((x, p) :: e) (tVar x) = p.
+Lemma interp_tVar_head: forall e y (p: {tp: type & interp_type tp}),
+    y = List.length e ->
+    interp_term (p :: e) (tVar y) = p.
 Proof.
-  intros. simpl. unfold lookup, List.find.
-  rewrite String.eqb_refl. reflexivity.
+  intros. subst. simpl. unfold lookup, List.find.
+  change (length (p :: e)) with (S (length e)).
+  destruct (S (length e) <=? length e) eqn: E. {
+    apply Nat.leb_le in E. exfalso. lia.
+  }
+  rewrite Nat.sub_diag.
+  reflexivity.
 Qed.
 
-Lemma interp_tVar_tail: forall e x y (p1 p2: {tp: type & interp_type tp}),
-    String.eqb y x = false ->
+Lemma interp_tVar_tail: forall e y (p1 p2: {tp: type & interp_type tp}),
+    length e <=? y = false ->
     interp_term e (tVar y) = p2 ->
-    interp_term ((x, p1) :: e) (tVar y) = p2.
+    interp_term (p1 :: e) (tVar y) = p2.
 Proof.
-  intros. simpl. unfold lookup, List.find.
-  rewrite H. rewrite <- H0. reflexivity.
+  intros. simpl in *. unfold lookup, List.find in *.
+  change (length (p1 :: e)) with (S (length e)).
+  rewrite H in H0.
+  apply Nat.leb_gt in H.
+  replace (S (length e) - S y) with (S (length e - S y)) by lia.
+  destruct (S (length e) <=? y) eqn: E. {
+    apply Nat.leb_le in E. exfalso. lia.
+  }
+  simpl.
+  assumption.
 Qed.
 
-Lemma interp_tLam: forall e x A B body f,
-  (forall x0, interp_term ((x, existT interp_type A x0) :: e) body = existT _ B (f x0)) ->
-  interp_term e (tLam x A B body) = existT _ (tpArr A B) f.
+Lemma interp_tLam: forall e A B body f,
+  (forall x0, interp_term (existT interp_type A x0 :: e) body = existT _ B (f x0)) ->
+  interp_term e (tLam A B body) = existT _ (tpArr A B) f.
 Proof.
   simpl.
   intros.
   f_equal.
   extensionality x'.
   specialize (H x').
-  destruct (interp_term ((x, existT interp_type A x') :: e) body) eqn: E.
+  destruct (interp_term (existT interp_type A x' :: e) body) eqn: E.
   inversion H.
   subst.
   simpl.
@@ -319,14 +338,8 @@ Ltac reify_type T :=
   | _ => fail "" T "is not a type"
   end.
 
-Lemma ack'_reification_helper: exists res,
-    interp_term nil res
-    = existT _ (tpArr tpNat (tpArr tpNat (tpArr tpNat tpNat))) ack'.
-Proof.
-  eexists.
-  unfold ack'.
-
-  repeat lazymatch goal with
+Ltac t :=
+  lazymatch goal with
   | |- interp_term ?e ?t = existT _ ?T (fun _ => _) =>
     eapply interp_tLam; intros ?
   | |- interp_term ?e ?t = existT _ ?T O =>
@@ -342,10 +355,29 @@ Proof.
     eapply (interp_tApp e _ _ A B)
   | |- interp_term ?e ?t = existT _ ?T ?x =>
     is_var x;
-    first [eapply interp_tVar_head | eapply interp_tVar_tail]
+    first [ eapply interp_tVar_head; cbv [length]; reflexivity
+          | eapply interp_tVar_tail; cbv [length]]
   end.
 
-Abort.
+Lemma ack'_reification_helper: exists res,
+    interp_term nil res
+    = existT _ (tpArr tpNat (tpArr tpNat (tpArr tpNat tpNat))) ack'.
+Proof.
+  eexists.
+  unfold ack'.
+  repeat t.
+  all: reflexivity.
+Defined.
+
+Definition ack_reified: term.
+  let r := eval unfold ack'_reification_helper in ack'_reification_helper in
+  match r with
+  | ex_intro _ ?x _ => exact x
+  end.
+Defined.
+
+Lemma interp_ack_reified: projT2 (interp_term nil ack_reified) = ack'.
+Proof. reflexivity. Qed.
 
 
 Definition contender_5: nat. Admitted.
