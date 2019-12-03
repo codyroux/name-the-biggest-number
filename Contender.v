@@ -769,17 +769,60 @@ Proof.
   eapply Nat.le_trans; eassumption.
 Qed.
 
+Lemma largest_of_depth_strictly_monotone: forall n1 n2,
+    0 < n1 < n2 ->
+    eval (largest_of_depth n1) < eval (largest_of_depth n2).
+Proof.
+  intros.
+  unfold largest_of_depth.
+  destruct n2 as [|n2]. 1: exfalso; lia.
+  simpl.
+  eapply Nat.le_lt_trans. 1: eapply largest_of_depth_monotone with (n2 := n2). 1: lia.
+  unfold largest_of_depth.
+  eapply Nat.lt_le_trans. 2: {
+    eapply lowerbound_maxBy with (x := (tApp tS (maxBy eval 0 tO (termsUpTo n2)))).
+    2: reflexivity.
+    apply in_app_iff; right.
+    apply in_app_iff; right.
+    apply in_app_iff; left.
+    match goal with
+    | |- In (tApp ?t1 ?t2) (map _ _) =>
+      change (tApp t1 t2) with ((fun '(t10, t20) => tApp t10 t20) (t1, t2))
+    end.
+    eapply in_map.
+    apply in_prod.
+    - destruct n2 as [|n2]. 1: exfalso; lia.
+      simpl.
+      do 3 (apply in_app_iff; right).
+      simpl. auto.
+    - pose proof (maxBy_In eval (termsUpTo n2) 0 tO eq_refl) as P.
+      destruct P as [P | P].
+      + exact P.
+      + rewrite P.
+        destruct n2 as [|n2]. 1: exfalso; lia.
+        simpl.
+        do 3 (apply in_app_iff; right).
+        simpl. auto.
+  }
+  generalize (maxBy eval 0 tO (termsUpTo n2)). intro t.
+  unfold eval.
+  simpl.
+  destruct (interp_term [] t) as [tp1 r1] eqn: E1.
+  destruct tp1 as [|A1 B1].
+  - unfold cast, cast_impl. simpl. unfold id. lia.
+  - lia.
+Qed.
+
 Theorem contender_4_lt_contender_5 : contender_4 < contender_5.
 Proof.
   rewrite <- contender_4''_equiv.
   rewrite <- eval_contender_4''_reified.
   unfold contender_5, largest_STLCNatRec_nat_of_depth.
-  replace lt with le by admit. (* almost, still need strict inequality *)
-  eapply Nat.le_trans. 1: eapply upperbound_eval.
-  eapply largest_of_depth_monotone.
-  cbv.
-  lia.
-
+  eapply Nat.le_lt_trans.
+  - eapply upperbound_eval.
+  - eapply largest_of_depth_strictly_monotone.
+    cbv.
+    lia.
 Qed.
 
 Print Assumptions contender_4_lt_contender_5.
