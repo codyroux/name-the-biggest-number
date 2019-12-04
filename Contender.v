@@ -1,25 +1,4 @@
 Require Import Arith Lia.
-
-
-Fixpoint iter (f : nat -> nat) (b : nat) :=
-  match b with
-  | 0 => 1
-  | S b' => f (iter f b')
-  end.
-
-Fixpoint ack (n a b : nat) :=
-  match n with
-  | 0 => S b
-  | 1 => a + b
-  | S n' => iter (ack n' a) b
-  end.
-
-
-(* This is the previous contender for largest number *)
-(* Submitted by codyroux *)
-Definition contender_4 := ack 5 42 10002.
-
-
 Require Import List. Import ListNotations.
 
 
@@ -331,498 +310,94 @@ Eval vm_compute in (largest_STLCNatRec_nat_of_depth 4).
 (* <brag>Note how its definition does not require any large literals</brag> ;-) *)
 Definition contender_5: nat := largest_STLCNatRec_nat_of_depth 42.
 
+Require Hurkens.
 
-(* Reification automation: *)
+Module TypeNequivSmallType.
+Import Hurkens.
 
-Definition type_eq_dec: forall x y : type, {x = y} + {x <> y}.
-  induction x; destruct y eqn: E; intros; simpl.
-  - left. reflexivity.
-  - right. intro C. discriminate.
-  - right. intro C. discriminate.
-  - specialize (IHx1 t1).
-    specialize (IHx2 t2).
-    destruct IHx1 as [E1 | N1]; destruct IHx2 as [E2 | N2]; try (right; congruence).
-    left. subst. reflexivity.
-Defined.
+Section Paradox.
 
-Lemma type_eqb_true: forall t1 t2, type_eqb t1 t2 = true -> t1 = t2.
+(* I feel like this version of the paradox should already by in
+   Hurkens.v but can't find it, there's only the version with A=U *)
+
+Definition U := Type.
+Variable A:U.
+
+Variable down : U -> A.
+Variable up : A -> U.
+Hypothesis up_down : forall (X:U), up (down X) = X.
+
+Theorem paradox : False.
 Proof.
-  induction t1; intros; destruct t2; simpl in *; try congruence.
-  apply Bool.andb_true_iff in H. destruct H. f_equal; eauto.
+  Generic.paradox p.
+  (** Large universe *)
+  + exact U.
+  + exact (fun X=>X).
+  + cbn. exact (fun X F => forall x:X, F x).
+  + cbn. exact (fun _ _ x => x).
+  + cbn. exact (fun _ _ x => x).
+  + exact (fun F => forall x:A, F (up x)).
+  + cbn. exact (fun _ f => fun x:A => f (up x)).
+  + cbn. intros * f X.
+    specialize (f (down X)).
+    rewrite up_down in f.
+    exact f.
+  (** Small universe *)
+  + exact A.
+  (** The interpretation of [A] as a universe is [U]. *)
+  + cbn. exact up.
+  + cbn. exact (fun _ F => down (forall x, up (F x))).
+  + cbn. exact (fun _ F => down (forall x, up (F x))).
+  + cbn. exact (down False).
+  + rewrite up_down in p.
+    exact p.
+  + cbn. easy.
+  + cbn. intros ? f X.
+    destruct (up_down X). cbn.
+    reflexivity.
+  + cbn. intros ? ? f.
+    rewrite up_down.
+    exact f.
+  + cbn. intros ? ? f.
+    rewrite up_down in f.
+    exact f.
+  + cbn. intros ? ? f.
+    rewrite up_down.
+    exact f.
+  + cbn. intros ? ? f.
+    rewrite up_down in f.
+    exact f.
 Qed.
 
-Lemma type_eqb_same: forall t, type_eqb t t = true.
+End Paradox.
+
+End TypeNequivSmallType.
+
+Inductive foo (A:Type) := bar X : foo X -> foo A | nonempty.
+Arguments nonempty {_}.
+
+Notation U := TypeNequivSmallType.U.
+
+Definition A : U := foo nat.
+
+Definition down : U -> A := fun u => bar nat u nonempty.
+
+Definition up : A -> U := fun a => match a with bar _ u _ => u | nonempty => nat end.
+
+Lemma up_down : forall (X:U), up (down X) = X.
 Proof.
-  induction t; simpl.
-  - reflexivity.
-  - rewrite IHt1, IHt2. reflexivity.
-Qed.
-
-(* only for the reification machinery, will not show up in the final proof *)
-Require Import FunctionalExtensionality.
-
-Lemma cast_impl_same: forall (B: type) (t: interp_type B),
-    fst (cast_impl B B) t = t /\ snd (cast_impl B B) t = t.
-Proof.
-  induction B; intros; simpl; unfold id.
-  - auto.
-  - do 2 rewrite type_eqb_same.
-    destruct (cast_impl B1 B1) as [fw1 bw1] eqn: E1.
-    destruct (cast_impl B2 B2) as [fw2 bw2] eqn: E2.
-    simpl in *.
-    split; extensionality arg.
-    + specialize (IHB1 arg).
-      apply proj2 in IHB1.
-      rewrite IHB1.
-      specialize (IHB2 (t arg)).
-      apply proj1 in IHB2.
-      exact IHB2.
-    + specialize (IHB1 arg).
-      apply proj1 in IHB1.
-      rewrite IHB1.
-      specialize (IHB2 (t arg)).
-      apply proj2 in IHB2.
-      exact IHB2.
-Qed.
-
-Lemma cast_same: forall (B: type) (t: interp_type B),
-    cast B t = t.
-Proof.
-  intros. unfold cast.
-  pose proof (cast_impl_same B t) as P.
-  apply proj1 in P.
-  exact P.
-Qed.
-
-Lemma interp_tVar: forall e x (p: {tp: type & interp_type tp}),
-    lookup e x = Some p ->
-    interp_term e (tVar x) = p.
-Proof. intros. simpl. rewrite H. reflexivity. Qed.
-
-Lemma interp_tVar_head: forall e y (p: {tp: type & interp_type tp}),
-    y = List.length e ->
-    interp_term (p :: e) (tVar y) = p.
-Proof.
-  intros. subst. simpl. unfold lookup, List.find.
-  change (length (p :: e)) with (S (length e)).
-  destruct (S (length e) <=? length e) eqn: E. {
-    apply Nat.leb_le in E. exfalso. lia.
-  }
-  rewrite Nat.sub_diag.
   reflexivity.
 Qed.
 
-Lemma interp_tVar_tail: forall e y (p1 p2: {tp: type & interp_type tp}),
-    length e <=? y = false ->
-    interp_term e (tVar y) = p2 ->
-    interp_term (p1 :: e) (tVar y) = p2.
+Definition contender_final : nat := 7.
+
+Lemma n_lt_contender_final :
+  forall n, n < contender_final.
+Proof (match TypeNequivSmallType.paradox A down up up_down with end).
+
+Lemma contender_5_lt_contender_final : contender_5 < contender_final.
 Proof.
-  intros. simpl in *. unfold lookup, List.find in *.
-  change (length (p1 :: e)) with (S (length e)).
-  rewrite H in H0.
-  apply Nat.leb_gt in H.
-  replace (S (length e) - S y) with (S (length e - S y)) by lia.
-  destruct (S (length e) <=? y) eqn: E. {
-    apply Nat.leb_le in E. exfalso. lia.
-  }
-  simpl.
-  assumption.
+  apply n_lt_contender_final.
 Qed.
 
-Lemma interp_tLam: forall e A B body f,
-  (forall x0, interp_term (existT interp_type A x0 :: e) body = existT _ B (f x0)) ->
-  interp_term e (tLam A B body) = existT _ (tpArr A B) f.
-Proof.
-  simpl.
-  intros.
-  f_equal.
-  extensionality x'.
-  specialize (H x').
-  destruct (interp_term (existT interp_type A x' :: e) body) eqn: E.
-  inversion H.
-  subst.
-  simpl.
-  apply cast_same.
-Qed.
-
-Lemma interp_tApp: forall e t1 t2 A B (f: interp_type A -> interp_type B) (a: interp_type A),
-    interp_term e t1 = existT _ (tpArr A B) f ->
-    interp_term e t2 = existT _ A a ->
-    interp_term e (tApp t1 t2) = existT _ B (f a).
-Proof.
-  intros.
-  simpl.
-  destruct (interp_term e t1) eqn: E1.
-  destruct (interp_term e t2) eqn: E2.
-  pose proof (EqdepFacts.eq_sigT_fst H). subst x.
-  apply Eqdep_dec.inj_pair2_eq_dec in H. 2: apply type_eq_dec. subst i.
-  pose proof (EqdepFacts.eq_sigT_fst H0). subst x0.
-  apply Eqdep_dec.inj_pair2_eq_dec in H0. 2: apply type_eq_dec. subst i0.
-  rewrite cast_same.
-  reflexivity.
-Qed.
-
-Lemma interp_tO: forall e, interp_term e tO = existT _ tpNat 0.
-Proof. intros. reflexivity. Qed.
-
-Lemma interp_tS: forall e, interp_term e tS = existT _ (tpArr tpNat tpNat) S.
-Proof. intros. reflexivity. Qed.
-
-Lemma interp_tNatRec: forall e R,
-    interp_term e (tNatRec R) =
-    existT _ (tpArr R (tpArr (tpArr tpNat (tpArr R R)) (tpArr tpNat R)))
-           (@Nat.recursion (interp_type R)).
-Proof.
-  intros. subst. reflexivity.
-Qed.
-
-(*
-Notation "A --> B" := (tpArr A B) (at level 60, right associativity).
-*)
-
-Ltac reify_type T :=
-  lazymatch T with
-  | ?A -> ?B => let A' := reify_type A in
-                let B' := reify_type B in
-                constr:(tpArr A' B')
-  | nat => constr:(tpNat)
-  | interp_type ?A => constr:(A)
-  | _ => fail "" T "is not a type"
-  end.
-
-Ltac t :=
-  lazymatch goal with
-  | |- interp_term ?e ?t = existT _ ?T (fun _ => _) =>
-    eapply interp_tLam; intros ?
-  | |- interp_term ?e ?t = existT _ ?T O =>
-    eapply interp_tO
-  | |- interp_term ?e ?t = existT _ ?T S =>
-    eapply interp_tS
-  | |- interp_term ?e ?t = existT _ ?T Nat.recursion =>
-    eapply interp_tNatRec
-  | |- interp_term ?e ?t = existT _ ?B (?f ?a) =>
-    let A := type of a in
-    let A := eval cbv beta iota in A in
-    let A := reify_type A in
-    eapply (interp_tApp e _ _ A B)
-  | |- interp_term ?e ?t = existT _ ?T ?x =>
-    is_var x;
-    first [ eapply interp_tVar_head; cbv [length]; reflexivity
-          | eapply interp_tVar_tail; cbv [length]]
-  end.
-
-
-(* Expressing contender_4 as an STLC+NatRec term: *)
-
-Definition ack'(n: nat): nat -> nat -> nat :=
-  Nat.recursion
-    (fun a b => S b)
-    (fun (pred0: nat) (rec0: nat -> nat -> nat) =>
-       Nat.recursion
-         (Nat.recursion (fun (m: nat) => m)
-                        (fun (pred: nat) (rec: nat -> nat) (m: nat) => S (rec m)))
-         (fun (pred: nat) (rec: nat -> nat -> nat) =>
-            (fun a b => Nat.recursion 1 (fun pred1 rec1 => rec a rec1) b))
-         pred0)
-    n.
-
-Lemma iter_proper: forall f1 f2,
-    (forall x, f1 x = f2 x) ->
-    forall b, iter f1 b = iter f2 b.
-Proof.
-  induction b.
-  - reflexivity.
-  - simpl. rewrite IHb. apply H.
-Qed.
-
-Definition iter' (f : nat -> nat) : nat -> nat :=
-  Nat.recursion 1 (fun (pred: nat) (rec: nat) => f rec).
-
-Lemma iter'_equiv: forall f b, iter' f b = iter f b.
-Proof. induction b; intros; simpl; congruence. Qed.
-
-Definition add': nat -> nat -> nat :=
-  Nat.recursion (fun (m: nat) => m) (fun (pred: nat) (rec: nat -> nat) (m: nat) => S (rec m)).
-
-Lemma add'_equiv: forall n m, add' n m = Nat.add n m.
-Proof.
-  induction n; intros; simpl.
-  - reflexivity.
-  - rewrite <- IHn. reflexivity.
-Qed.
-
-Definition mul': nat -> nat -> nat :=
-  Nat.recursion (fun (m: nat) => 0)
-                (fun (pred: nat) (rec: nat -> nat) (m: nat) => add' m (rec m)).
-
-Lemma mul'_equiv: forall n m, mul' n m = Nat.mul n m.
-Proof.
-  induction n; intros; simpl.
-  - reflexivity.
-  - rewrite <- IHn. rewrite add'_equiv. reflexivity.
-Qed.
-
-Definition pow'(n: nat): nat -> nat :=
-  Nat.recursion 1 (fun (pred: nat) (rec: nat) => mul' n rec).
-
-Lemma pow'_equiv: forall n m, pow' n m = Nat.pow n m.
-Proof.
-  induction m; intros; simpl.
-  - reflexivity.
-  - rewrite <- IHm. rewrite mul'_equiv. reflexivity.
-Qed.
-
-Lemma ack'_equiv: forall n a b, ack' n a b = ack n a b.
-Proof.
-  induction n; intros; simpl.
-  - reflexivity.
-  - destruct n.
-    + simpl. apply add'_equiv.
-    + specialize (IHn a).
-      rewrite <- (iter_proper _ _ IHn).
-      rewrite <- iter'_equiv. reflexivity.
-Qed.
-
-Lemma ack'_reification_helper: exists res,
-    interp_term nil res
-    = existT _ (tpArr tpNat (tpArr tpNat (tpArr tpNat tpNat))) ack'.
-Proof.
-  eexists.
-  unfold ack'.
-  repeat t.
-  all: reflexivity.
-Defined.
-
-Definition ack_reified: term.
-  let r := eval unfold ack'_reification_helper in ack'_reification_helper in
-  match r with
-  | ex_intro _ ?x _ => exact x
-  end.
-Defined.
-
-Lemma interp_ack_reified: projT2 (interp_term nil ack_reified) = ack'.
-Proof. reflexivity. Qed.
-
-Eval cbv in (term_depth ack_reified).
-
-Definition contender_4': nat.
-  let r := eval unfold pow', mul', add' in (ack' 5 (mul' 6 7) (S (S (pow' 10 4)))) in exact r.
-Defined.
-
-Lemma f_equal_ack'_equiv: forall n a b1 b2 : nat,
-    b1 = b2 ->
-    ack' n a b1 = ack n a b2.
-Proof.
-  intros.
-  rewrite ack'_equiv.
-  f_equal.
-  assumption.
-Qed.
-
-Lemma contender_4'_equiv: contender_4' = contender_4.
-Proof.
-  unfold contender_4', contender_4.
-  apply f_equal_ack'_equiv.
-  vm_compute.
-  reflexivity.
-Qed.
-
-Definition contender_4'': nat.
-  let r := eval unfold contender_4', ack' in contender_4' in exact r.
-Defined.
-
-Lemma contender_4''_equiv: contender_4'' = contender_4.
-Proof.
-  etransitivity. 2: exact contender_4'_equiv.
-  unfold contender_4'', contender_4'.
-  unfold ack'.
-  repeat apply f_equal.
-  reflexivity.
-Qed.
-
-Lemma contender_4''_reification_helper: exists res,
-    interp_term nil res
-    = existT _ tpNat contender_4''.
-Proof.
-  eexists.
-  unfold contender_4''.
-  repeat t.
-  all: reflexivity.
-Defined.
-
-Definition contender_4''_reified: term.
-  let r := eval unfold contender_4''_reification_helper in contender_4''_reification_helper in
-  match r with
-  | ex_intro _ ?x _ => exact x
-  end.
-Defined.
-
-Lemma interp_contender_4''_reified:
-  projT2 (interp_term nil contender_4''_reified) = contender_4''.
-Proof.
-  cbv -[Nat.recursion].
-  repeat apply f_equal.
-  reflexivity.
-Qed.
-
-Lemma eval_contender_4''_reified:
-  eval contender_4''_reified = contender_4''.
-Proof.
-  unfold eval.
-  cbv -[Nat.recursion].
-  repeat apply f_equal.
-  reflexivity.
-Qed.
-
-Eval cbv in (term_depth contender_4''_reified).
-
-
-(* Proving that the new contender is bigger than the previous one: *)
-
-Lemma maxBy_In{T: Type}: forall f (l: list T) currentMax currentBest,
-    currentMax = f currentBest ->
-    List.In (maxBy f currentMax currentBest l) l \/ maxBy f currentMax currentBest l = currentBest.
-Proof.
-  induction l; intros.
-  - simpl. auto.
-  - subst. simpl in *.
-    destruct (f currentBest <? f a) eqn: E.
-    + specialize (IHl (f a) _ eq_refl). firstorder congruence.
-    + specialize (IHl (f currentBest) _ eq_refl). firstorder congruence.
-Qed.
-
-Lemma maxBy_at_least_currentMax{T: Type}: forall (f: T -> nat) l currentMax currentBest,
-    f currentBest = currentMax ->
-    currentMax <= f (maxBy f currentMax currentBest l).
-Proof.
-  induction l; intros; simpl in *.
-  - lia.
-  - subst. destruct (f currentBest <? f a) eqn: E.
-    + apply Nat.ltb_lt in E.
-      specialize (IHl (f a) _ eq_refl).
-      lia.
-    + apply Nat.ltb_ge in E.
-      eapply IHl.
-      reflexivity.
-Qed.
-
-Lemma lowerbound_maxBy{T: Type}: forall (f: T -> nat) x l currentMax currentBest,
-    List.In x l ->
-    f currentBest = currentMax ->
-    f x <= f (maxBy f currentMax currentBest l).
-Proof.
-  induction l; intros; simpl in *.
-  - contradiction.
-  - destruct H.
-    + subst.
-      destruct (f currentBest <? f x) eqn: E.
-      * apply Nat.ltb_lt in E.
-        eapply maxBy_at_least_currentMax.
-        reflexivity.
-      * apply Nat.ltb_ge in E.
-        eapply Nat.le_trans. 1: eassumption.
-        eapply maxBy_at_least_currentMax.
-        reflexivity.
-    + subst.
-      destruct (f currentBest <? f a) eqn: E.
-      * apply Nat.ltb_lt in E.
-        eauto.
-      * apply Nat.ltb_ge in E.
-        eauto.
-Qed.
-
-Lemma upperbound_eval: forall t,
-    eval t <= eval (largest_of_depth (term_depth t)).
-Proof.
-  intros. unfold largest_of_depth.
-  eapply Nat.le_trans. 2: {
-    eapply lowerbound_maxBy with (x := t). 2: reflexivity.
-    eapply termsUpTo_correct.
-    lia.
-  }
-  lia.
-Qed.
-
-Lemma maxBy_monotone{T: Type}: forall f (l1 l2: list T) currentMax currentBest,
-    (forall x, In x l1 -> In x l2) ->
-    f currentBest = currentMax ->
-    f (maxBy f currentMax currentBest l1) <= f (maxBy f currentMax currentBest l2).
-Proof.
-  intros. subst.
-  pose proof (maxBy_In f l1 (f currentBest) _ eq_refl) as P.
-  destruct P as [P | P].
-  - specialize (H _ P).
-    eapply lowerbound_maxBy. 1: exact H. reflexivity.
-  - rewrite P. eapply maxBy_at_least_currentMax. reflexivity.
-Qed.
-
-Lemma largest_of_depth_monotone: forall n1 n2,
-    n1 <= n2 ->
-    eval (largest_of_depth n1) <= eval (largest_of_depth n2).
-Proof.
-  intros.
-  unfold largest_of_depth.
-  eapply (maxBy_monotone eval (termsUpTo n1) (termsUpTo n2)). 2: reflexivity.
-  intros.
-  eapply termsUpTo_correct.
-  eapply termsUpTo_correct in H0.
-  eapply Nat.le_trans; eassumption.
-Qed.
-
-Lemma largest_of_depth_strictly_monotone: forall n1 n2,
-    0 < n1 < n2 ->
-    eval (largest_of_depth n1) < eval (largest_of_depth n2).
-Proof.
-  intros.
-  unfold largest_of_depth.
-  destruct n2 as [|n2]. 1: exfalso; lia.
-  simpl.
-  eapply Nat.le_lt_trans. 1: eapply largest_of_depth_monotone with (n2 := n2). 1: lia.
-  unfold largest_of_depth.
-  eapply Nat.lt_le_trans. 2: {
-    eapply lowerbound_maxBy with (x := (tApp tS (maxBy eval 0 tO (termsUpTo n2)))).
-    2: reflexivity.
-    apply in_app_iff; right.
-    apply in_app_iff; right.
-    apply in_app_iff; left.
-    match goal with
-    | |- In (tApp ?t1 ?t2) (map _ _) =>
-      change (tApp t1 t2) with ((fun '(t10, t20) => tApp t10 t20) (t1, t2))
-    end.
-    eapply in_map.
-    apply in_prod.
-    - destruct n2 as [|n2]. 1: exfalso; lia.
-      simpl.
-      do 3 (apply in_app_iff; right).
-      simpl. auto.
-    - pose proof (maxBy_In eval (termsUpTo n2) 0 tO eq_refl) as P.
-      destruct P as [P | P].
-      + exact P.
-      + rewrite P.
-        destruct n2 as [|n2]. 1: exfalso; lia.
-        simpl.
-        do 3 (apply in_app_iff; right).
-        simpl. auto.
-  }
-  generalize (maxBy eval 0 tO (termsUpTo n2)). intro t.
-  unfold eval.
-  simpl.
-  destruct (interp_term [] t) as [tp1 r1] eqn: E1.
-  destruct tp1 as [|A1 B1].
-  - unfold cast, cast_impl. simpl. unfold id. lia.
-  - lia.
-Qed.
-
-Theorem contender_4_lt_contender_5 : contender_4 < contender_5.
-Proof.
-  rewrite <- contender_4''_equiv.
-  rewrite <- eval_contender_4''_reified.
-  unfold contender_5, largest_STLCNatRec_nat_of_depth.
-  eapply Nat.le_lt_trans.
-  - eapply upperbound_eval.
-  - eapply largest_of_depth_strictly_monotone.
-    cbv.
-    lia.
-Qed.
-
-Print Assumptions contender_4_lt_contender_5.
+Print Assumptions contender_5_lt_contender_final.
