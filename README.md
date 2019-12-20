@@ -24,4 +24,4 @@ A few base rules:
 
 - No shenanigans! Though I might have an honorable mention category if you can really fool me.
 
-- Currently the definition and proof should build with Coq version 8.9.1, but I'll update this on request.
+- Currently the definition and proof should build with Coq version 8.10.2 (thanks to [Jakob](https://github.com/jakobbotsch) for "encouraging" this change), but I'll update this on request.
