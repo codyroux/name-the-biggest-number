@@ -33,8 +33,6 @@ Definition PVal := string -> nat -> Prop.
 
 Definition VVal := string -> nat.
 
-Check string_dec.
-
 Definition extend{A} (f : string -> A) : string -> A -> (string -> A) :=
   fun s a s' =>
     if string_dec s s' then
@@ -62,8 +60,6 @@ Fixpoint eval (pval : PVal) (vval : VVal) (P : pred) : Prop :=
 Import ListNotations.
 
 Definition ctxt := list pred.
-
-Search (string -> string -> bool).
 
 Fixpoint free_pred_var (name : string) (P : pred) : bool :=
   match P with
@@ -129,10 +125,8 @@ Definition no_capture_prop (P : pred) (Q : pred) : Prop :=
   /\
     (* We only need this direction for predicate variables, since they
        can't be free in terms. *)
-    (forall X, bound_pred_var X P = true -> free_pred_var X P = false)
+    (forall X, bound_pred_var X P = true -> free_pred_var X Q = false)
 .
-
-Search (list _ -> bool).
 
 Definition free_pred name Γ := existsb (free_pred_var name) Γ.
 Definition free_tm name Γ := existsb (free_tm_var name) Γ.
@@ -180,10 +174,6 @@ Notation "t1 ≃ t2" := (FORALL P, t1 ∈ P ⇒ t2 ∈ P) (at level 20).
 
 Notation "∃ y , Q" := (FORALL P, (all y, Q ⇒ P) ⇒ P)(at level 10).
 
-Check In.
-
-Locate "=".
-
 Notation "⊥" := (FORALL P, all y, v y ∈ P).
 
 Inductive derives : ctxt -> pred -> Prop :=
@@ -214,8 +204,6 @@ Inductive derives : ctxt -> pred -> Prop :=
 
 Notation "Γ ⊢ P" := (derives Γ P)(at level 40).
 
-Search (list _ -> Prop).
-
 Definition validates(pval : PVal)(vval : VVal) (Γ : ctxt) : Prop :=
   Forall (eval pval vval) Γ.
 
@@ -224,6 +212,19 @@ Definition models (Γ : ctxt)(P : pred) : Prop :=
     validates pval vval Γ -> eval pval vval P.
 
 Notation "Γ ⊧ P" := (models Γ P)(at level 40).
+
+Lemma forall_iff : forall A (P Q : A -> Prop),
+    (forall x, P x <-> Q x) ->
+    (forall x, P x) <-> (forall x, Q x).
+Proof.
+  firstorder.
+Qed.
+
+Lemma impl_iff : forall P Q R S : Prop,
+    (P <-> R) -> (Q <-> S) -> (P -> Q) <-> (R -> S).
+Proof.
+  intuition.
+Qed.
 
 Lemma extend_subst_tm : forall t vval x u n,
     eval_tm vval u = n ->
@@ -247,18 +248,12 @@ Lemma eval_ext : forall P pval vval vval',
 Proof.
   induction P0; intros; simpl.
   - erewrite eval_tm_ext; eauto; reflexivity.
-  - split; intros; eapply IHP0.
+  - apply forall_iff; intros.
+    eapply IHP0.
     + intros; unfold extend.
       rewrite<- H.
       reflexivity.
-    + now eauto.
-    + intros; unfold extend; rewrite H; reflexivity.
-    + now eauto.
-  - split; intros; eapply IHP0.
-    + intros; symmetry; now apply H.
-    + now apply H0. (* Huh, some eta here... *)
-    + now apply H.
-    + now auto.
+  - apply forall_iff; intros; eapply IHP0; now auto.
   - rewrite IHP0_1 in *; try apply H.
     rewrite IHP0_2 in *; try apply H.
     reflexivity.
@@ -271,18 +266,23 @@ Lemma eval_ext' : forall P pval pval' vval,
 Proof.
   induction P0; intros; simpl.
   - erewrite H; reflexivity.
-  - split; intros; eapply IHP0.
-    + intros; symmetry; now eauto.
-    + now auto.
-    + now eauto.
-    + now eauto.
-  - split; intros h Pr.
-    + eapply IHP0; [| apply h].
-      intros; unfold extend.
-      destruct (string_dec s X); now eauto.
-    + eapply IHP0; [| apply h].
-      intros; unfold extend.
-      destruct (string_dec s X); now eauto.
+  - apply forall_iff; intros; eapply IHP0; now auto.
+  - apply forall_iff; intros Pr; eapply IHP0.
+    intros X; unfold extend; destruct (string_dec s X); now auto.
+  - rewrite IHP0_1; eauto.
+    rewrite IHP0_2; eauto.
+    reflexivity.
+Qed.
+
+Lemma eval_ext'' : forall P pval pval' vval,
+    (forall X n, pval X n <-> pval' X n) ->
+    eval pval vval P <-> eval pval' vval P.
+Proof.
+  induction P0; intros; simpl.
+  - erewrite eval_tm_ext; eauto; reflexivity.
+  - apply forall_iff; intros; eapply IHP0; now eauto.
+  - apply forall_iff; intros; eapply IHP0; intros.
+    unfold extend; destruct (string_dec s X); auto; reflexivity.
   - rewrite IHP0_1; eauto.
     rewrite IHP0_2; eauto.
     reflexivity.
@@ -309,8 +309,6 @@ Proof.
   destruct (string_dec s2 s); auto.
   congruence.
 Qed.
-
-Search "_ || _".
 
 Lemma no_capture_tm_forall : forall P x t,
     no_capture_tm (all x, P) t -> no_capture_tm P t.
@@ -405,7 +403,7 @@ Proof.
     erewrite IHP0_2; eauto.
     reflexivity.
 Qed.
-  
+
 
 Lemma no_capture_tm_forall_extend : forall x P u t vval,
     no_capture_tm (all x, P) t ->
@@ -459,6 +457,66 @@ Proof.
 Qed.
 
 
+Lemma extend_ext : forall pval X (P : nat -> Prop) P',
+    (forall n, P n <-> P' n) ->
+    forall Y m, extend pval X P Y m <-> extend pval X P' Y m.
+Proof.
+  unfold extend.
+  intros; destruct (string_dec X Y); simpl; auto; reflexivity.
+Qed.
+
+(* Wow this stings *)
+Lemma no_capture_prop_forall : forall P Q x, no_capture_prop (all x, P) Q -> no_capture_prop P Q.
+Proof.
+  unfold no_capture_prop; simpl.
+  ((intros P Q s1; intros (h1 & h2 & h3 & h4); repeat split; intros s2;
+    assert (h1' := h1 s2);
+    assert (h2' := h2 s2);
+    assert (h3' := h3 s2);
+    assert (h4' := h4 s2);
+    destruct (string_dec s1 s2) as [eq | neq];
+    subst;
+    ((try (rewrite eqb_refl in *));
+      simpl in *; intros; auto;
+      (try rewrite<- eqb_neq in *);
+       (try rewrite neq in *); simpl in *; auto))).
+     - rewrite H in *.
+       destruct (string_dec s2 s2); auto; try congruence.
+       assert (ex_falso := h1' (eq_refl true)).
+       congruence.
+     - rewrite H in *.
+       destruct (string_dec s2 s1); auto.
+       symmetry in e.
+       rewrite<- eqb_eq in *.
+       congruence.
+Qed.
+
+
+Lemma no_capture_prop_FORALL : forall P Q X, no_capture_prop (FORALL X, P) Q -> no_capture_prop P Q.
+Proof.
+  unfold no_capture_prop; simpl.
+  setoid_rewrite Bool.orb_true_iff.
+  firstorder.
+Qed.
+
+Lemma no_capture_prop_impl1 : forall P1 P2 Q,
+    no_capture_prop (P1 ⇒ P2) Q -> no_capture_prop P1 Q.
+Proof.
+  unfold no_capture_prop; simpl.
+  setoid_rewrite Bool.orb_true_iff.
+  setoid_rewrite Bool.orb_false_iff.
+  firstorder.
+Qed.
+
+Lemma no_capture_prop_impl2 : forall P1 P2 Q,
+    no_capture_prop (P1 ⇒ P2) Q -> no_capture_prop P2 Q.
+Proof.
+  unfold no_capture_prop; simpl.
+  setoid_rewrite Bool.orb_true_iff.
+  setoid_rewrite Bool.orb_false_iff.
+  firstorder.
+Qed.
+
 Lemma extend_subst' : forall P pval vval X Q,
     no_capture_prop P Q ->
     let V := fun n => eval pval (extend vval pattern_var n) Q in
@@ -473,11 +531,54 @@ Proof.
     unfold no_capture_prop in H.
     destruct H as [h1 [h2 [h3 h4]]].
     now auto.
-  - split; intros h n; try apply IHP0.
-    + pose (V' := (fun m => eval pval (extend (extend vval pattern_var m) s n) Q)).
+  - apply forall_iff; intros n.
+    + pose (V' := (fun m => eval pval (extend (extend vval s n) pattern_var m) Q)).
       assert (forall n, V n <-> V' n).
-      (* apply IHP0. *)
-Admitted.
+      -- unfold V, V'.
+         intros.
+         destruct (string_dec s pattern_var).
+         ++ apply eval_ext; intros.
+            symmetry.
+            apply extend_idem; now auto.
+         ++
+           etransitivity.
+           { apply nfree_tm_extend_pred.
+             unfold no_capture_prop in H; destruct H as [h1 [h2 [h3 h4]]].
+             assert (h3' := h3 s).
+             simpl in h3'.
+             rewrite eqb_refl in *; simpl in h3'.
+             now auto. }
+           apply eval_ext; intros; apply extend_commut; now auto.
+      -- assert (h' := IHP0 pval (extend vval s n)).
+         assert (h'' := eval_ext'' P0 (extend pval X V) (extend pval X V')).
+         rewrite h''; [| apply extend_ext; now auto].
+         (* whew *)
+         apply h'.
+         now apply (no_capture_prop_forall _ _ _ H).
+  - destruct (string_dec X s) as [eq | neq]; simpl; apply forall_iff; intros Pr.
+    + apply eval_ext'; intros.
+      rewrite extend_idem; now auto.
+    + rewrite IHP0.
+      -- apply eval_ext''.
+         intros X' m.
+         rewrite extend_commut; [| now auto].
+         unfold extend.
+         destruct (string_dec s X'); [reflexivity |].
+         destruct (string_dec X X'); [| reflexivity].
+         unfold V.
+         replace (fun s' : string => if string_dec s s' then Pr else pval s') with (extend pval s Pr) by reflexivity.
+         replace (fun s' : string => if string_dec pattern_var s' then m else vval s') with (extend vval pattern_var m) by reflexivity.
+         rewrite<- nfree_pred_extend_pred; [reflexivity|].
+         destruct H as (h1 & h2 & h3 & h4).
+         apply h4.
+         simpl; rewrite eqb_refl; now auto.
+      -- eapply no_capture_prop_FORALL; now eauto.
+  - apply impl_iff.
+    + apply IHP0_1.
+      eapply no_capture_prop_impl1; now eauto.
+    + apply IHP0_2.
+      eapply no_capture_prop_impl2; now eauto.
+Qed.
 
 Print subst_pred_pred.
 
