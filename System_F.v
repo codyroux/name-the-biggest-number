@@ -7,46 +7,28 @@ https://github.com/ajcave/code/blob/master/normalization/weak-head-bigstep-cbn.a
 But CBV.
 
 
-*)
+ *)
 
 
 (* Trying to formalize the normalization of closed system F terms *)
 Require Import List Arith Bool.
+Require Import Autosubst.Autosubst.
 
 Import ListNotations.
 
-Definition name := nat.
-
-(* Don't really need de Bruijn for types: *)
-(* We just do the "textbook logic book" trick and add a bunch of free var assumptions. *)
 Inductive type :=
-| Tvar : name -> type
+| Tvar : var -> type
 | Arrow : type -> type -> type
-| Forall : name -> type -> type.
+| Forall : {bind type} -> type.
 
-Fixpoint is_free (n : name) (t : type) :=
-  match t with
-  | Tvar k => if k =? n then true else false
-  | Arrow t1 t2 => (is_free n t1) || (is_free n t2)
-  | Forall k t1 =>
-    if n =? k then false else
-      (is_free n t1)
-  end.
-
-(* Boring ol' shadowing substitution *)
-Fixpoint ty_subst (n : name) (t u : type) :=
-  match t with
-  | Tvar k => if k =? n then u else Tvar k
-  | Arrow t1 t2 => Arrow (ty_subst n t1 u) (ty_subst n t2 u)
-  | Forall k t1 =>
-    if n =? k then t else
-    Forall k (ty_subst n t1 u)
-  end.
-
+Instance Ids_type : Ids type. derive. Defined.
+Instance Rename_type : Rename type. derive. Defined.
+Instance Subst_type : Subst type. derive. Defined.
+Instance SubstLemmas_type : SubstLemmas type. derive. Defined.
 
 (* No explicit type abstractions or applications: we don't really care about type-checking. *)
 Inductive term :=
-| Var : nat -> term
+| Var : var -> term
 | App : term -> term -> term
 | Abs : term -> term.
 
@@ -63,10 +45,10 @@ Fixpoint nth_error (ectx : eval_ctxt) (n : nat) : option value :=
   match ectx with
   | Empty_ctxt => None
   | Push_ctxt t e cs =>
-    match n with
-    | 0 => Some (VAbs t e)
-    | S m => nth_error cs m
-    end
+      match n with
+      | 0 => Some (VAbs t e)
+      | S m => nth_error cs m
+      end
   end.
 
 Definition cons_ctxt (v : value) (e : eval_ctxt) : eval_ctxt :=
@@ -94,23 +76,10 @@ Hint Constructors TmEval.
 
 Definition context := list type.
 
-Definition is_free_ctxt : name -> context -> bool :=
-  fun n ctxt =>
-    List.existsb (fun ty => is_free n ty) ctxt.
+Locate ren.
 
-Fixpoint is_bound n ty :=
-  match ty with
-  | Tvar _ => false
-  | Arrow ty1 ty2 =>
-    is_bound n ty1 || is_bound n ty2
-  | Forall m ty' =>
-    (m =? n) || is_bound n ty'
-  end.
-
-(* true iff no bound variable if ty1 is free in ty2 *)
-Definition no_capture ty1 ty2 :=
-    forall n, is_bound n ty1 = true -> is_free n ty2 = false.
-
+(* Oh joy, some de Bruijn shennans *)
+Definition lift_ctx : context -> context := List.map (fun ty => ty.[ren (+1)]).
 
 (* Type checking is undecidable, but who cares? *)
 Inductive TyRel : context -> term -> type -> Prop :=
@@ -124,14 +93,12 @@ Inductive TyRel : context -> term -> type -> Prop :=
     TyRel ctxt t (Arrow ty1 ty2) ->
     TyRel ctxt u ty1 ->
     TyRel ctxt (App t u) ty2
-| TyRel_ty_abs : forall ctxt n ty t,
-    is_free_ctxt n ctxt = false ->
-    TyRel ctxt t ty ->
-    TyRel ctxt t (Forall n ty)
-| TyRel_ty_app : forall ctxt n ty1 ty2 t,
-    no_capture ty1 ty2 -> (* very required! *)
-    TyRel ctxt t (Forall n ty1) ->
-    TyRel ctxt t (ty_subst n ty1 ty2) (* No tags for substs, because they only matter operationally. *)
+| TyRel_ty_abs : forall ctxt ty t,
+    TyRel (lift_ctx ctxt) t ty ->
+    TyRel ctxt t (Forall ty)
+| TyRel_ty_app : forall ctxt ty1 ty2 t,
+    TyRel ctxt t (Forall ty1) ->
+    TyRel ctxt t ty1.[ty2/] (* No tags for substs, because they only matter operationally. *)
 .
 
 (* What we really care about: a term normalizes in a context. *)
@@ -144,21 +111,26 @@ Record comp_pair :=
   { comp_term : eval_ctxt -> term -> Prop;
     comp_val : value -> Prop }.
 
-Definition valuation := name -> comp_pair.
+Definition valuation := var -> comp_pair.
 
-
-Definition extend (f : valuation)(v : name)(P : comp_pair) : valuation :=
-  fun var => if var =? v then P else f var.
 
 (* This is the "usual" computability predicates stuff, but for normal forms in a given strategy.*)
 Record computable (P : comp_pair) :=
   {
-  comp_norm : forall ectx t, comp_term P ectx t -> norm ectx t;
-  comp_val_of_term : forall ectx t v, TmEval ectx t v -> comp_term P ectx t -> comp_val P v;
-  comp_term_of_val : forall ectx t v, TmEval ectx t v -> comp_val P v -> comp_term P ectx t
+    comp_norm : forall ectx t, comp_term P ectx t -> norm ectx t;
+    comp_val_of_term : forall ectx t v, TmEval ectx t v -> comp_term P ectx t -> comp_val P v;
+    comp_term_of_val : forall ectx t v, TmEval ectx t v -> comp_val P v -> comp_term P ectx t
   }.
 
 Definition norm_pred := {| comp_term := norm; comp_val := fun _ => True |}.
+
+
+Lemma forall_iff : forall A (P Q : A -> Prop),
+    (forall x, P x <-> Q x) -> (forall x, P x) <-> (forall x, Q x).
+Proof.
+  firstorder.
+Qed.
+
 
 (* A good sanity check, but we use it for dummy values later *)
 Lemma computable_norm : computable norm_pred.
@@ -171,7 +143,7 @@ Qed.
 interpretation for types without values, like Forall X.X...
 
 The "usual" proof has neutral terms in all types.
-*)
+ *)
 
 Hint Resolve computable_norm.
 
@@ -183,44 +155,44 @@ Fixpoint interp_term (ty : type) : valuation -> eval_ctxt -> term -> Prop :=
     match ty with
     | Tvar v => comp_term (val v)
     | Arrow t1 t2 =>
-      fun ectx t =>
-        exists t' ectx',
-          TmEval ectx t (VAbs t' ectx') /\
-        forall v,
-          interp_val t1 val v ->
-          interp_term t2 val (v ::: ectx') t'
-    | Forall name ty =>
-      fun ectx t =>
-        forall P, computable P -> interp_term ty (extend val name P) ectx t
+        fun ectx t =>
+          exists t' ectx',
+            TmEval ectx t (VAbs t' ectx') /\
+              forall v,
+                interp_val t1 val v ->
+                interp_term t2 val (v ::: ectx') t'
+    | Forall ty =>
+        fun ectx t =>
+          forall P, computable P -> interp_term ty (P.:val) ectx t
     end
 with interp_val (ty : type) : valuation -> value -> Prop :=
        fun val =>
          match ty with
          | Tvar v => comp_val (val v)
          | Arrow t1 t2 =>
-           fun v =>
-             match v with
-             | VAbs t env =>
-               forall v,
-                 interp_val t1 val v ->
-                 interp_term t2 val (v ::: env) t
-             end
-         | Forall name ty =>
-           fun v =>
-             forall P, computable P -> interp_val ty (extend val name P) v
+             fun v =>
+               match v with
+               | VAbs t env =>
+                   forall v,
+                     interp_val t1 val v ->
+                     interp_term t2 val (v ::: env) t
+               end
+         | Forall ty =>
+             fun v =>
+               forall P, computable P -> interp_val ty (P .: val) v
          end
 .
 
 Definition computable_valuation (val : valuation) :=
   forall v, computable (val v).
 
-Lemma computable_valuation_extend : forall n val P,
+Lemma computable_valuation_extend : forall val P,
     computable_valuation val ->
-    computable P -> computable_valuation (extend val n P).
+    computable P -> computable_valuation (P .: val).
 Proof.
-  unfold extend, computable_valuation.
-  intros n ? ? ? ? m.
-  case (m =? n); auto.
+  unfold ".:", computable_valuation.
+  intros ? ? ? ? m.
+  case m; auto.
 Qed.
 
 Hint Resolve computable_valuation_extend.
@@ -247,7 +219,7 @@ Lemma computable_interp_term : forall ty val,
     computable {| comp_term := interp_term ty val; comp_val := interp_val ty val |} .
 Proof.
   induction ty.
-  simpl; intros val H; constructor; simpl; intros; try (destruct (H n); now eauto).
+  simpl; intros val H; constructor; simpl; intros; try (edestruct H; now eauto).
   - intros; constructor; simpl.
     + intros ectx t [t' [ectx' [eval_t _]]].
       eexists; now eauto.
@@ -261,17 +233,17 @@ Proof.
       assert (h := computable_norm : computable P).
       intros ectx t comp_t.
       assert (comp_t1 := comp_t _ h).
-      assert (comp_ext : computable_valuation (extend val n P)) by auto.
+      assert (comp_ext : computable_valuation (P .: val)) by auto.
       assert (comp_t2 := IHty _ comp_ext).
       destruct comp_t2; simpl in *.
       now auto.
     + intros ectx t v eval_t h P comp_p.
-      assert (h0 : computable_valuation (extend val n P)) by auto.
+      assert (h0 : computable_valuation (P .: val)) by auto.
       assert (comp_ext := IHty _ h0).
       destruct comp_ext; simpl in *.
       now eauto.
     + intros ectx t v eval_t h P comp_p.
-      assert (h0 : computable_valuation (extend val n P)) by auto.
+      assert (h0 : computable_valuation (P .: val)) by auto.
       assert (comp_ext := IHty _ h0).
       destruct comp_ext; simpl in *.
       now eauto.
@@ -287,8 +259,8 @@ Definition ctxt_val : valuation -> eval_ctxt -> context -> Prop :=
     forall n ty,
       List.nth_error ctx n = Some ty ->
       exists v,
-      nth_error ectx n = Some v /\
-      interp_val ty val v.
+        nth_error ectx n = Some v /\
+          interp_val ty val v.
 
 (* The notion of equality for computable pairs. Probably we should use
    setoids here, a lot of pain later because of our laziness...*)
@@ -296,8 +268,8 @@ Definition equiv_comp_pair P P' :=
   (forall ectx t,
       comp_term P ectx t <-> comp_term P' ectx t)
   /\
-  (forall v,
-      comp_val P v <-> comp_val P' v)
+    (forall v,
+        comp_val P v <-> comp_val P' v)
 .
 
 Lemma equiv_comp_pair_sym : forall P P',
@@ -314,20 +286,19 @@ Qed.
 
 Hint Resolve equiv_comp_pair_refl.
 
-Lemma extend_equiv : forall val val' n P,
+Lemma extend_equiv : forall val val' P,
     (forall m, equiv_comp_pair (val m) (val' m)) ->
-    forall k, equiv_comp_pair (extend val n P k) (extend val' n P k).
+    forall k, equiv_comp_pair ((P .: val) k) ((P .: val') k).
 Proof.
   intros.
-  unfold extend.
-  destruct (k =? n); simpl; auto.
+  destruct k; simpl; auto.
 Qed.
 
 Lemma ty_subst_ext : forall ty val val',
     (forall n, equiv_comp_pair (val n) (val' n)) ->
     (forall ectx t, interp_term ty val ectx t -> interp_term ty val' ectx t)
     /\
-    (forall v, interp_val ty val v -> interp_val ty val' v).
+      (forall v, interp_val ty val v -> interp_val ty val' v).
 Proof.
   induction ty; intros val val' H; split; simpl; intros; try apply H; auto.
   - destruct H0 as [t' [ectx' [eval_t comp_t]]].
@@ -341,147 +312,83 @@ Proof.
   - eapply IHty; [intros; apply extend_equiv; eauto| now auto].
 Qed.
 
-(* Crucial to deal with our lack of DB in types.
-   You think you're simplifing your life at first...
-*)
-Lemma is_not_free_extend : forall ty n val P,
-    is_free n ty = false ->
+
+Lemma interp_lift_aux : forall ty val θ,
     (forall ectx t,
-      interp_term ty val ectx t <->
-      interp_term ty (extend val n P) ectx t)
+        interp_term ty.[ren θ] val ectx t <->
+          interp_term ty (θ >>> val) ectx t)
     /\
-    (forall v,
-        interp_val ty val v <->
-        interp_val ty (extend val n P) v)
+      (forall v,
+          interp_val ty.[ren θ] val v <->
+            interp_val ty (θ >>> val) v)
 .
 Proof.
-  induction ty; simpl; intros.
-  - unfold extend; assert (eq := Nat.eqb_eq n n0).
-    destruct (n =? n0); split; intros; try congruence; reflexivity; eauto.
-  - rewrite orb_false_iff in *.
-    destruct H.
-    split; [split; intro h; destruct h as [t' [ectx' [h1 h2]]]; exists t', ectx'; split; eauto; intros v| ].
-    + edestruct IHty1; edestruct IHty2; eauto.
-      rewrite<- H3.
-      rewrite<- H2.
-      eauto.
-    + edestruct IHty1; edestruct IHty2; eauto.
-      rewrite H3.
-      rewrite H2.
-      eauto.
-    + intros v; destruct v.
-      split; intros h v; edestruct IHty1; edestruct IHty2; eauto.
-      -- rewrite<- H2.
-         rewrite<- H3.
-         eauto.
-      -- rewrite H2.
-         rewrite H3.
-         now eauto.
-  - assert (eq := Nat.eqb_eq n0 n).
-    destruct (n0 =? n).
-    assert (n0 = n) by firstorder; subst.
-    + assert (forall P0 k,
-                 equiv_comp_pair
-                   (extend val n P0 k)
-                   (extend (extend val n P) n P0 k)).
-      {
-        unfold extend; intros; destruct (k =? n); simpl;
-          apply equiv_comp_pair_refl; eauto.
-      }
-      split; split; intros; eapply ty_subst_ext; intros;
-        try apply H0; try (apply equiv_comp_pair_sym; apply H0); try apply H1; eauto. (* Maybe first [apply ...] here? *)
-    + assert (forall P0 k,
-                 equiv_comp_pair
-                   (extend (extend val n0 P) n P0 k)
-                   (extend (extend val n P0) n0 P k)).
-      {
-        unfold extend; intros.
-        assert (eq' := Nat.eqb_eq k n).
-        assert (eq'' := Nat.eqb_eq k n0).
-        destruct (k =? n); destruct (k =? n0); simpl; try apply equiv_comp_pair_refl.
-        assert (n0 = n) by (firstorder; congruence).
-        exfalso.
-        assert (false = true) by (apply eq; eauto).
-        congruence.
-      }
-      split; split; intros;
-        try (eapply ty_subst_ext; intros;
-             apply equiv_comp_pair_sym; apply H0; apply IHty; now eauto).
-      -- eapply ty_subst_ext; intros; try apply equiv_comp_pair_sym; try apply H0.
-         apply IHty; eauto.
-      -- assert (interp_term ty (extend (extend val n P0) n0 P) ectx t) by (eapply ty_subst_ext; intros; try apply H0; eauto).
-         revert H3.
-         apply IHty; eauto.
-      -- eapply ty_subst_ext; intros; try apply equiv_comp_pair_sym; try apply H0; eauto.
-         apply IHty; eauto.
-      -- assert (interp_val ty (extend (extend val n P0) n0 P) v) by (eapply ty_subst_ext; intros; try apply H0; eauto).
-         revert H3.
-         apply IHty; eauto.
-         (* WTF *)
-         Unshelve.
-         auto.
-         auto.
-         auto.
-         auto.
-         auto.
-         auto.
-         auto.
-         auto.
+  induction ty.
+  - destruct v; asimpl; now firstorder.
+  - split; repeat apply forall_iff; intros.
+    + simpl.
+      split; intros (t' & ectx' & h1 & h2).
+      -- exists t'; exists ectx'; split; intros; auto.
+         apply IHty2; apply h2.
+         eapply IHty1; eauto.
+      -- exists t'; exists ectx'; split; intros; auto.
+         eapply IHty2; apply h2; apply IHty1; eauto.
+    + simpl; destruct v; apply forall_iff; intros v.
+      split; intros h h'; eapply IHty2; apply h; eapply IHty1; now eauto.
+  - intros val P; simpl.
+    split; intros; repeat apply forall_iff; intros Q; apply forall_iff; intros comp.
+    + assert (h : Q .: P >>> val = (upren P) >>> (Q .: val)) by autosubst.
+      asimpl; rewrite h; apply IHty.
+    + asimpl.
+      assert (h : Q .: P >>> val = (upren P) >>> (Q .: val)) by autosubst.
+      rewrite h.
+      apply IHty.
 Qed.
 
-
-Lemma no_capture_arrow1 : forall ty1_1 ty1_2 ty2, no_capture (Arrow ty1_1 ty1_2) ty2 -> no_capture ty1_1 ty2.
-Proof.
-  unfold no_capture; simpl.
-  setoid_rewrite orb_true_iff; auto.
-Qed.
-
-Hint Resolve no_capture_arrow1.
-
-Lemma no_capture_arrow2 : forall ty1_1 ty1_2 ty2, no_capture (Arrow ty1_1 ty1_2) ty2 -> no_capture ty1_2 ty2.
-Proof.
-  unfold no_capture; simpl.
-  setoid_rewrite orb_true_iff; auto.
-Qed.
-
-Hint Resolve no_capture_arrow2.
-
-Lemma no_capture_forall : forall n ty1 ty2, no_capture (Forall n ty1) ty2 -> no_capture ty1 ty2.
-Proof.
-  unfold no_capture; simpl.
-  setoid_rewrite orb_true_iff; auto.
-Qed.
-
-Hint Resolve no_capture_forall.
-
-Lemma no_capture_forall_free : forall n ty1 ty2,
-    no_capture (Forall n ty1) ty2 ->
-    is_free n ty2 = false.
-Proof.
-  unfold no_capture; intros n ty1 ty2 H; generalize (H n); simpl.
-  rewrite Nat.eqb_refl; simpl; auto.
-Qed.
-
-Hint Resolve no_capture_forall_free.
-
-(* And the magical lemma to swap substitution and interpretation. Also painful. *)
-Lemma ty_subst_extend : forall ty1 n ty2 val,
-    let interp_ty2 := {| comp_term := interp_term ty2 val; comp_val := interp_val ty2 val |} in
-    no_capture ty1 ty2 ->
-    (forall ectx t, interp_term (ty_subst n ty1 ty2) val ectx t <-> interp_term ty1 (extend val n interp_ty2) ectx t)
+Lemma interp_lift : forall ty val P,
+    (forall ectx t,
+        interp_term ty val ectx t <->
+          interp_term ty.[ren (+1)] (P .: val) ectx t)
     /\
-    (forall v, interp_val (ty_subst n ty1 ty2) val v <-> interp_val ty1 (extend val n interp_ty2) v)
+      (forall v,
+          interp_val ty val v <->
+            interp_val ty.[ren (+1)] (P .: val) v)
 .
 Proof.
-  induction ty1; unfold extend in *; simpl; intros m; intros.
-  - simpl; destruct (n =? m); now auto.
+  split; repeat apply forall_iff; intros.
+  - split; intros.
+    apply interp_lift_aux.
+    asimpl; auto.
+    assert (h : interp_term ty ((+1) >>> P .: val) ectx t)
+      by (apply interp_lift_aux; auto).
+    now auto.
+  - split; intros;
+      apply interp_lift_aux; asimpl; auto.
+    assert (h : interp_val ty ((+1) >>> P .: val) v) by (apply interp_lift_aux; auto).
+    now auto.
+Qed.
+
+Definition interp_pair ty val :=
+  {| comp_term := interp_term ty val; comp_val := interp_val ty val |}.
+
+
+(* And the magical lemma to swap substitution and interpretation. *)
+Lemma ty_subst_extend : forall ty1 val θ,
+    let interp ty := interp_pair ty val in
+    (forall ectx t, interp_term (ty1.[θ]) val ectx t <-> interp_term ty1 (θ >>> interp) ectx t)
+    /\
+      (forall v, interp_val (ty1.[θ]) val v <-> interp_val ty1 (θ >>> interp) v)
+.
+Proof.
+  induction ty1; intros.
+  - destruct v; now auto.
   - split; split; intros h.
     + destruct h as [t' [ectx' [eval_t comp_t]]].
       exists t', ectx'; split; auto; intros v0.
       intros.
       apply IHty1_2; eauto.
       apply comp_t.
-      apply IHty1_1; eauto.
+      apply IHty1_1; now eauto.
     + destruct h as [t' [ectx' [eval_t comp_t]]].
       exists t', ectx'; split; auto.
       intros; apply IHty1_2; eauto.
@@ -495,106 +402,30 @@ Proof.
       apply IHty1_2; eauto.
       apply h.
       apply IHty1_1; eauto.
-  - simpl; unfold extend.
-    case_eq (m =? n); intros eq_n_m; try rewrite eq_n_m; simpl;
-      [assert (m = n) by (apply beq_nat_true; eauto)  | assert (m <> n) by (apply beq_nat_false; eauto)];
-      [subst; unfold extend; split; intros; split; intros;
-        assert
-          (val_ext : forall n m,
-              equiv_comp_pair
-                ((fun var : name =>
-                    if var =? n
-                    then P else val var) m)
-                ((fun var : name =>
-                    if var =? n
-                    then P
-                    else if var =? n then {| comp_term := interp_term ty2 val; comp_val := interp_val ty2 val |} else val var) m)
-          ) by (intros k1 k2; destruct (k2 =? k1); eauto);
-        eapply ty_subst_ext; eauto; try apply val_ext; intros; try (apply equiv_comp_pair_sym; apply val_ext) |].
-    split; split; intros; assert (IH := IHty1 m ty2 (extend val n P)); clear IHty1; unfold extend in *.
-    + apply (ty_subst_ext
-               ty1
-               (
-                 fun var : name =>
-                   if var =? m
-                   then
-                     {|
-                       comp_term := interp_term ty2 (fun var0 : name => if var0 =? n then P else val var0);
-                       comp_val := interp_val ty2 (fun var0 : name => if var0 =? n then P else val var0) |}
-                   else if var =? n then P else val var
-               )
-               _); [| apply IH; eauto].
-      intros.
-      assert (at_most_one : ((n0 =? m) = false) \/ ((n0 =? n) = false)) by
-          (case_eq (n0 =? m); case_eq (n0 =? n);
-           repeat rewrite Nat.eqb_neq;
-           repeat rewrite Nat.eqb_eq;
-           intros; try congruence; auto).
-      split; intros; destruct (n0 =? m); destruct (n0 =? n); simpl; try reflexivity; destruct at_most_one; try congruence.
-      -- symmetry; eapply is_not_free_extend; eauto.
-      -- symmetry; eapply is_not_free_extend; eauto.
-    + apply IH; [ now eauto |].
-      apply (ty_subst_ext
-               ty1
-               (
-                 fun var : name =>
-                   if var =? n
-                   then P
-                   else if var =? m then {| comp_term := interp_term ty2 val; comp_val := interp_val ty2 val |} else val var
-               )
-               _); [ | now auto].
-      intros n0;
-      assert (at_most_one : ((n0 =? m) = false) \/ ((n0 =? n) = false)) by
-          (case_eq (n0 =? m); case_eq (n0 =? n);
-           repeat rewrite Nat.eqb_neq;
-           repeat rewrite Nat.eqb_eq;
-           intros; try congruence; auto).
-      split; intros; destruct (n0 =? m); destruct (n0 =? n); simpl; try reflexivity; destruct at_most_one; try congruence.
-      -- eapply is_not_free_extend; eauto.
-      -- eapply is_not_free_extend; eauto.
-    + apply (ty_subst_ext
-               ty1
-               (
-                 fun var : name =>
-                   if var =? m
-                   then
-                     {|
-                       comp_term := interp_term ty2 (fun var0 : name => if var0 =? n then P else val var0);
-                       comp_val := interp_val ty2 (fun var0 : name => if var0 =? n then P else val var0) |}
-                   else if var =? n then P else val var
-               )
-               _); [| apply IH; eauto].
-      intros.
-      assert (at_most_one : ((n0 =? m) = false) \/ ((n0 =? n) = false)) by
-          (case_eq (n0 =? m); case_eq (n0 =? n);
-           repeat rewrite Nat.eqb_neq;
-           repeat rewrite Nat.eqb_eq;
-           intros; try congruence; auto).
-      split; intros; destruct (n0 =? m); destruct (n0 =? n); simpl; try reflexivity; destruct at_most_one; try congruence.
-      -- symmetry; eapply is_not_free_extend; eauto.
-      -- symmetry; eapply is_not_free_extend; eauto.
-    + apply IH; [now eauto |].
-      apply (ty_subst_ext
-               ty1
-               (
-                 fun var : name =>
-                   if var =? n
-                   then P
-                   else if var =? m then {| comp_term := interp_term ty2 val; comp_val := interp_val ty2 val |} else val var
-               )
-               _); [| now eauto].
-      intros;
-      assert (at_most_one : ((n0 =? m) = false) \/ ((n0 =? n) = false)) by
-          (case_eq (n0 =? m); case_eq (n0 =? n);
-           repeat rewrite Nat.eqb_neq;
-           repeat rewrite Nat.eqb_eq;
-           intros; try congruence; auto).
-      split; intros; destruct (n0 =? m); destruct (n0 =? n); simpl; try reflexivity; destruct at_most_one; try congruence;
-        eapply is_not_free_extend; eauto.
+  - simpl; split; intros; apply forall_iff; intros P; apply forall_iff; intros comp.
+    + assert (h := IHty1 (P .: val) (up θ)).
+      destruct h as (h1 & h2).
+      assert (h1' := h1 ectx t).
+      rewrite h1'.
+      split; eapply ty_subst_ext; unfold equiv_comp_pair; intros v'.
+      -- destruct v'; simpl; [firstorder|].
+         asimpl.
+         split; intros; apply interp_lift_aux.
+      -- destruct v'; simpl; [firstorder|].
+         asimpl.
+         split; intros; symmetry; apply interp_lift_aux.
+    +  assert (h := IHty1 (P .: val) (up θ)).
+       destruct h as (h1 & h2).
+       assert (h2' := h2 v).
+       rewrite h2'.
+       split; eapply ty_subst_ext; unfold equiv_comp_pair; intros v'.
+       -- destruct v'; simpl; [firstorder|].
+          asimpl.
+          split; intros; apply interp_lift_aux.
+       -- destruct v'; simpl; [firstorder|].
+          asimpl.
+          split; intros; symmetry; apply interp_lift_aux.
 Qed.
-
-Definition interp_pair ty val :=
-  {| comp_term := interp_term ty val; comp_val := interp_val ty val |}.
 
 Lemma comp_eval : forall P ectx ectx' t t',
     computable P ->
@@ -608,33 +439,45 @@ Proof.
   eapply comp_val_of_term0; now eauto.
 Qed.
 
-Lemma is_free_ctx_nth_error : forall n m ctx ty,
-    is_free_ctxt n ctx = false ->
-    List.nth_error ctx m = Some ty ->
-    is_free n ty = false.
+Lemma nth_lift : forall n ctx ty,
+    List.nth_error ctx n = Some ty ->
+    List.nth_error (lift_ctx ctx) n = Some ty.[ren (+1)].
 Proof.
-  unfold is_free_ctxt.
-  intros.
-  assert (is_free n (nth m ctx (Tvar n)) = false).
-  {
-    apply existsb_nth; auto.
-    apply nth_error_Some; congruence.
-  }
-  assert (nth m ctx (Tvar n) = ty) by (apply nth_error_nth; auto).
-  subst; auto.
+  induction n; destruct ctx; simpl; try (intros; congruence).
+  auto.
 Qed.
 
-Lemma ctxt_val_extend : forall P n val ectx ctx,
-    is_free_ctxt n ctx = false ->
+
+Lemma nth_lift' : forall n ctx ty,
+    List.nth_error (lift_ctx ctx) n = Some ty.[ren (+1)] ->
+    List.nth_error ctx n = Some ty.
+Proof.
+  induction n; destruct ctx; simpl; try (intros; congruence); auto.
+  intros ? h; inversion h; auto.
+  f_equal.
+  eapply lift_injn; eauto.
+Qed.
+
+Hint Resolve nth_lift'.
+
+Lemma nth_lift'' : forall n ctx ty,
+    List.nth_error (lift_ctx ctx) n = Some ty ->
+    exists ty', ty = ty'.[ren (+1)].
+Proof.
+  induction n; destruct ctx; simpl; try (intros; congruence); intros; inversion H; try (eexists; now eauto).
+  edestruct IHn; eauto.
+Qed.
+
+Lemma ctxt_val_extend : forall P val ectx ctx,
     computable P -> ctxt_val val ectx ctx ->
-    ctxt_val (extend val n P) ectx ctx.
+    ctxt_val (P .: val) ectx (lift_ctx ctx).
 Proof.
   unfold ctxt_val.
-  intros ? ? ? ? ? ? ? h n ty ?.
+  intros ? ? ? ? ? h n ty ?.
+  edestruct nth_lift''; eauto; subst.
   edestruct h as [v [nth_v interp_v]]; eauto.
   exists v; split; auto.
-  apply is_not_free_extend; auto.
-  eapply is_free_ctx_nth_error; eauto.
+  apply interp_lift; auto.
 Qed.
 
 (* Somewhat painless once you get *everything perfectly right* up to here. *)
@@ -675,7 +518,25 @@ Proof.
   - apply IHTyRel; eauto.
     apply ctxt_val_extend; auto.
   - simpl in *.
-    apply ty_subst_extend; auto.
+    apply ty_subst_extend; asimpl.
+    Check equiv_comp_pair.
+    assert
+      (forall X,
+          equiv_comp_pair
+            (((interp_pair ty2 val) .: val) X)
+            (((interp_pair ty2 val) .: (ids >>> (fun ty => interp_pair ty val))) X)
+      ).
+    { unfold interp_pair.
+      intro X.
+      unfold ".:".
+      destruct X; auto; simpl.
+      destruct (val X); simpl.
+      apply equiv_comp_pair_refl.
+    }
+    apply (ty_subst_ext _ _ _ H1).
+    apply IHTyRel; auto.
+    Search computable.
+    apply computable_interp_term; auto.
 Qed.
 
 (* Easy peesy. We do use the fact that there is *some* computable predicate. *)
@@ -684,7 +545,7 @@ Theorem norm_f : forall t ty,
     norm [::] t.
 Proof.
   intros.
-  pose (val := fun _ : name => norm_pred).
+  pose (val := fun _ : var => norm_pred).
   assert (interp_term ty val [::] t).
   - apply ty_safe with (ctx := []); auto.
     + intro; simpl; apply computable_norm.
@@ -726,9 +587,9 @@ Defined. (* Just in case we wanna compute a bit *)
 (* We actually know how to define a WF relation on *these* now. *)
 Record red_triple :=
   {
-  red_ctx : eval_ctxt;
-  red_tm : term;
-  red_correct : exists val, TmEval red_ctx red_tm val;
+    red_ctx : eval_ctxt;
+    red_tm : term;
+    red_correct : exists val, TmEval red_ctx red_tm val;
   }.
 
 Definition eval_rel : red_triple -> red_triple -> Prop :=
@@ -757,7 +618,7 @@ Definition eval_triple : forall tr : red_triple, { v : value | TmEval (red_ctx t
   apply (Fix wf_triple).
   intros x eval_triple_rec.
   destruct x as [ectx t ?].
-  destruct t.
+  destruct t as [n | |]; simpl.
   (* Variable case *)
   - case_eq (nth_error ectx n); intros.
     + exists v; simpl.
@@ -803,6 +664,7 @@ Definition eval_f (t : term) (ty : type)(well_typed : TyRel [] t ty) : value :=
   let v := eval_triple triple in
   proj1_sig v.
 
+
 Theorem eval_f_correct : forall t ty wt,
     TmEval [::] t (eval_f t ty wt).
 Proof.
@@ -813,6 +675,7 @@ Proof.
   simpl in h.
   apply h.
 Qed.
+
 
 (* Just to see what it's like *)
 Recursive Extraction eval_f.
