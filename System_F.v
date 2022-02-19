@@ -6,29 +6,24 @@ https://github.com/ajcave/code/blob/master/normalization/weak-head-bigstep-cbn.a
 
 But CBV.
 
+Also; I'm using autosubst-2 for binders (not strictly necessary, but a good learning exercise).
+https://github.com/uds-psl/autosubst2
 
  *)
 
 
 (* Trying to formalize the normalization of closed system F terms *)
 Require Import List Arith Bool.
-Require Import Autosubst.Autosubst.
+Require Export System_F_syn.
 
 Import ListNotations.
 
-Inductive type :=
-| Tvar : var -> type
-| Arrow : type -> type -> type
-| Forall : {bind type} -> type.
-
-Instance Ids_type : Ids type. derive. Defined.
-Instance Rename_type : Rename type. derive. Defined.
-Instance Subst_type : Subst type. derive. Defined.
-Instance SubstLemmas_type : SubstLemmas type. derive. Defined.
+Definition none {A} := @Init.Datatypes.None A.
+Definition some {A} := @Init.Datatypes.Some A.
 
 (* No explicit type abstractions or applications: we don't really care about type-checking. *)
 Inductive term :=
-| Var : var -> term
+| Var : fin -> term
 | App : term -> term -> term
 | Abs : term -> term.
 
@@ -41,12 +36,14 @@ Inductive eval_ctxt :=
 Notation "[::]" := Empty_ctxt.
 Inductive value := VAbs : term -> eval_ctxt -> value.
 
+Locate option.
+
 Fixpoint nth_error (ectx : eval_ctxt) (n : nat) : option value :=
   match ectx with
-  | Empty_ctxt => None
+  | Empty_ctxt => none
   | Push_ctxt t e cs =>
       match n with
-      | 0 => Some (VAbs t e)
+      | 0 => some (VAbs t e)
       | S m => nth_error cs m
       end
   end.
@@ -60,7 +57,7 @@ Notation "v ::: e" := (cons_ctxt v e)(at level 30, right associativity).
 
 Inductive TmEval : eval_ctxt -> term -> value -> Prop :=
 | Eval_var : forall ectx n v,
-    nth_error ectx n = Some v ->
+    nth_error ectx n =  some v ->
     TmEval ectx (Var n) v
 (* Weak reduction *)
 | Eval_abs : forall ectx t, TmEval ectx (Abs t) (VAbs t ectx)
@@ -79,12 +76,12 @@ Definition context := list type.
 Locate ren.
 
 (* Oh joy, some de Bruijn shennans *)
-Definition lift_ctx : context -> context := List.map (fun ty => ty.[ren (+1)]).
+Definition lift_ctx : context -> context := List.map (fun ty => ty⟨↑⟩).
 
 (* Type checking is undecidable, but who cares? *)
 Inductive TyRel : context -> term -> type -> Prop :=
 | TyRel_var : forall ctxt n ty,
-    List.nth_error ctxt n = Some ty ->
+    List.nth_error ctxt n = some ty ->
     TyRel ctxt (Var n) ty
 | TyRel_abs : forall ctxt ty1 ty2 t,
     TyRel (ty1::ctxt) t ty2 ->
@@ -98,7 +95,7 @@ Inductive TyRel : context -> term -> type -> Prop :=
     TyRel ctxt t (Forall ty)
 | TyRel_ty_app : forall ctxt ty1 ty2 t,
     TyRel ctxt t (Forall ty1) ->
-    TyRel ctxt t ty1.[ty2/] (* No tags for substs, because they only matter operationally. *)
+    TyRel ctxt t ty1[ty2..] (* No tags for substs, because they only matter operationally. *)
 .
 
 (* What we really care about: a term normalizes in a context. *)
@@ -111,7 +108,7 @@ Record comp_pair :=
   { comp_term : eval_ctxt -> term -> Prop;
     comp_val : value -> Prop }.
 
-Definition valuation := var -> comp_pair.
+Definition valuation := fin -> comp_pair.
 
 
 (* This is the "usual" computability predicates stuff, but for normal forms in a given strategy.*)
@@ -153,7 +150,7 @@ Hint Resolve computable_norm.
 Fixpoint interp_term (ty : type) : valuation -> eval_ctxt -> term -> Prop :=
   fun val =>
     match ty with
-    | Tvar v => comp_term (val v)
+    | var_type v => comp_term (val v)
     | Arrow t1 t2 =>
         fun ectx t =>
           exists t' ectx',
@@ -168,7 +165,7 @@ Fixpoint interp_term (ty : type) : valuation -> eval_ctxt -> term -> Prop :=
 with interp_val (ty : type) : valuation -> value -> Prop :=
        fun val =>
          match ty with
-         | Tvar v => comp_val (val v)
+         | var_type v => comp_val (val v)
          | Arrow t1 t2 =>
              fun v =>
                match v with
@@ -203,7 +200,7 @@ Hint Resolve computable_valuation_extend.
 Lemma eval_det : forall ectx t v v',
     TmEval ectx t v -> TmEval ectx t v' -> v = v'.
 Proof.
-  intros t ectx v v' H; revert v'; induction H; intros v2 H'; inversion H'; subst; auto; try congruence.
+  intros t ectx v v' H; revert v'; induction H; intros v2 H'; inversion H'; subst; auto; unfold some in *; try congruence.
   assert (v = v0) by firstorder.
   subst v.
   assert (H2 : VAbs t' ectx' = VAbs t'0 ectx'0) by firstorder.
@@ -257,9 +254,9 @@ Check nth_error.
 Definition ctxt_val : valuation -> eval_ctxt -> context -> Prop :=
   fun val ectx ctx =>
     forall n ty,
-      List.nth_error ctx n = Some ty ->
+      List.nth_error ctx n = some ty ->
       exists v,
-        nth_error ectx n = Some v /\
+        nth_error ectx n = some v /\
           interp_val ty val v.
 
 (* The notion of equality for computable pairs. Probably we should use
@@ -315,16 +312,16 @@ Qed.
 
 Lemma interp_lift_aux : forall ty val θ,
     (forall ectx t,
-        interp_term ty.[ren θ] val ectx t <->
-          interp_term ty (θ >>> val) ectx t)
+        interp_term ty⟨θ⟩ val ectx t <->
+          interp_term ty (θ >> val) ectx t)
     /\
       (forall v,
-          interp_val ty.[ren θ] val v <->
-            interp_val ty (θ >>> val) v)
+          interp_val ty⟨θ⟩ val v <->
+            interp_val ty (θ >> val) v)
 .
 Proof.
   induction ty.
-  - destruct v; asimpl; now firstorder.
+  - destruct n; asimpl; now firstorder.
   - split; repeat apply forall_iff; intros.
     + simpl.
       split; intros (t' & ectx' & h1 & h2).
@@ -337,10 +334,11 @@ Proof.
       split; intros h h'; eapply IHty2; apply h; eapply IHty1; now eauto.
   - intros val P; simpl.
     split; intros; repeat apply forall_iff; intros Q; apply forall_iff; intros comp.
-    + assert (h : Q .: P >>> val = (upren P) >>> (Q .: val)) by autosubst.
-      asimpl; rewrite h; apply IHty.
     + asimpl.
-      assert (h : Q .: P >>> val = (upren P) >>> (Q .: val)) by autosubst.
+      assert (h : Q, P >> val = (0, P >> S) >> (Q, val)) by (asimpl; auto).
+      rewrite h; apply IHty.
+    + asimpl.
+      assert (h : Q, P >> val = (0, P >> S) >> (Q, val)) by (asimpl; auto).
       rewrite h.
       apply IHty.
 Qed.
@@ -348,23 +346,28 @@ Qed.
 Lemma interp_lift : forall ty val P,
     (forall ectx t,
         interp_term ty val ectx t <->
-          interp_term ty.[ren (+1)] (P .: val) ectx t)
+          interp_term ty⟨↑⟩ (P, val) ectx t)
     /\
       (forall v,
           interp_val ty val v <->
-            interp_val ty.[ren (+1)] (P .: val) v)
+            interp_val ty⟨↑⟩ (P, val) v)
 .
 Proof.
   split; repeat apply forall_iff; intros.
   - split; intros.
     apply interp_lift_aux.
     asimpl; auto.
-    assert (h : interp_term ty ((+1) >>> P .: val) ectx t)
+    assert (h : interp_term ty (↑ >> (P, val)) ectx t)
       by (apply interp_lift_aux; auto).
     now auto.
   - split; intros;
       apply interp_lift_aux; asimpl; auto.
-    assert (h : interp_val ty ((+1) >>> P .: val) v) by (apply interp_lift_aux; auto).
+    Check interp_lift_aux.
+    Check ren_type.
+    Check interp_lift_aux.
+    change (ren_type (fun x => x) ty) with (ty⟨id⟩).
+    asimpl.
+    assert (h : interp_val ty (↑ >> (P, val)) v) by (apply interp_lift_aux; auto).
     now auto.
 Qed.
 
@@ -375,13 +378,13 @@ Definition interp_pair ty val :=
 (* And the magical lemma to swap substitution and interpretation. *)
 Lemma ty_subst_extend : forall ty1 val θ,
     let interp ty := interp_pair ty val in
-    (forall ectx t, interp_term (ty1.[θ]) val ectx t <-> interp_term ty1 (θ >>> interp) ectx t)
+    (forall ectx t, interp_term (ty1[θ]) val ectx t <-> interp_term ty1 (θ >> interp) ectx t)
     /\
-      (forall v, interp_val (ty1.[θ]) val v <-> interp_val ty1 (θ >>> interp) v)
+      (forall v, interp_val (ty1[θ]) val v <-> interp_val ty1 (θ >> interp) v)
 .
 Proof.
   induction ty1; intros.
-  - destruct v; now auto.
+  - destruct n; now auto.
   - split; split; intros h.
     + destruct h as [t' [ectx' [eval_t comp_t]]].
       exists t', ectx'; split; auto; intros v0.
@@ -403,7 +406,7 @@ Proof.
       apply h.
       apply IHty1_1; eauto.
   - simpl; split; intros; apply forall_iff; intros P; apply forall_iff; intros comp.
-    + assert (h := IHty1 (P .: val) (up θ)).
+    + assert (h := IHty1 (P .: val) (up_type_type θ)).
       destruct h as (h1 & h2).
       assert (h1' := h1 ectx t).
       rewrite h1'.
@@ -414,7 +417,7 @@ Proof.
       -- destruct v'; simpl; [firstorder|].
          asimpl.
          split; intros; symmetry; apply interp_lift_aux.
-    +  assert (h := IHty1 (P .: val) (up θ)).
+    +  assert (h := IHty1 (P .: val) (up_type_type θ)).
        destruct h as (h1 & h2).
        assert (h2' := h2 v).
        rewrite h2'.
@@ -440,29 +443,49 @@ Proof.
 Qed.
 
 Lemma nth_lift : forall n ctx ty,
-    List.nth_error ctx n = Some ty ->
-    List.nth_error (lift_ctx ctx) n = Some ty.[ren (+1)].
+    List.nth_error ctx n = some ty ->
+    List.nth_error (lift_ctx ctx) n = some ty⟨↑⟩.
 Proof.
-  induction n; destruct ctx; simpl; try (intros; congruence).
+  induction n; destruct ctx; unfold lift_ctx, some; simpl; try (intros; congruence).
   auto.
 Qed.
 
+Check shift.
+Check up_type_type.
+
+Lemma lift_inj_aux : forall t1 t2 θ,
+    (forall x y, θ x = θ y -> x = y) ->
+    t1⟨θ⟩ = t2⟨θ⟩ -> t1 = t2.
+Proof.
+  induction t1; induction t2; simpl; asimpl; try congruence; auto.
+  - intros ? ? h; inversion h; now auto.
+  - intros ? ? h; inversion h; f_equal; firstorder.
+  - intros ? ? h; inversion h as [h']; f_equal.
+    eapply IHt1; [| apply h'].
+    intros [] []; asimpl; try congruence; auto.
+Qed.
+
+Lemma lift_inj : forall t1 t2, t1⟨↑⟩ = t2⟨↑⟩ -> t1 = t2.
+Proof.
+  intros; eapply lift_inj_aux; eauto.
+Qed.
 
 Lemma nth_lift' : forall n ctx ty,
-    List.nth_error (lift_ctx ctx) n = Some ty.[ren (+1)] ->
-    List.nth_error ctx n = Some ty.
+    List.nth_error (lift_ctx ctx) n = some ty⟨↑⟩ ->
+    List.nth_error ctx n = some ty.
 Proof.
-  induction n; destruct ctx; simpl; try (intros; congruence); auto.
+  induction n; destruct ctx; unfold lift_ctx, some;
+    simpl; try (intros; congruence); auto.
   intros ? h; inversion h; auto.
   f_equal.
-  eapply lift_injn; eauto.
+  apply lift_inj; auto.
 Qed.
 
 Hint Resolve nth_lift'.
 
 Lemma nth_lift'' : forall n ctx ty,
-    List.nth_error (lift_ctx ctx) n = Some ty ->
-    exists ty', ty = ty'.[ren (+1)].
+    List.nth_error (lift_ctx ctx) n = some ty ->
+    exists ty', ty = ty'⟨↑⟩.
 Proof.
   induction n; destruct ctx; simpl; try (intros; congruence); intros; inversion H; try (eexists; now eauto).
   edestruct IHn; eauto.
@@ -519,37 +542,29 @@ Proof.
     apply ctxt_val_extend; auto.
   - simpl in *.
     apply ty_subst_extend; asimpl.
-    Check equiv_comp_pair.
-    assert
-      (forall X,
-          equiv_comp_pair
-            (((interp_pair ty2 val) .: val) X)
-            (((interp_pair ty2 val) .: (ids >>> (fun ty => interp_pair ty val))) X)
-      ).
-    { unfold interp_pair.
-      intro X.
-      unfold ".:".
-      destruct X; auto; simpl.
-      destruct (val X); simpl.
-      apply equiv_comp_pair_refl.
-    }
-    apply (ty_subst_ext _ _ _ H1).
-    apply IHTyRel; auto.
-    Search computable.
-    apply computable_interp_term; auto.
+
+    replace (interp_pair ty2 val, var_type >> (fun ty : type => interp_pair ty val))
+            with
+            (interp_pair ty2 val, val).
+    { apply IHTyRel; auto.
+      apply computable_interp_term; auto. }
+    fext; intros []; simpl; asimpl; auto.
+    unfold interp_pair.
+    unfold interp_term, interp_val.
+    destruct (val n); auto.
 Qed.
 
 (* Easy peesy. We do use the fact that there is *some* computable predicate. *)
 Theorem norm_f : forall t ty,
-    TyRel [] t ty ->
+    TyRel List.nil t ty ->
     norm [::] t.
 Proof.
   intros.
-  pose (val := fun _ : var => norm_pred).
+  pose (val := fun _ : fin => norm_pred).
   assert (interp_term ty val [::] t).
   - apply ty_safe with (ctx := []); auto.
     + intro; simpl; apply computable_norm.
-    + intro n; destruct n; simpl; intros; congruence.
+    + intro n; destruct n; simpl; intros; unfold some, none in *; try congruence.
   - assert (comp : computable (interp_pair ty val))
       by (unfold interp_pair; apply computable_interp_term; intro; simpl; apply computable_norm).
     destruct comp; auto.
@@ -558,23 +573,26 @@ Qed.
 (* Sadly, in a constructive logic, this isn't quite enough to get you a *normalization function*. *)
 (* Let's finish the steps, which involve Acc, well_founded and singleton elimination... *)
 
+Locate "*".
+Print prod.
+
 (* The exact things we need for the recursive calls: this is roughly the Bove-Capretta method. *)
 Inductive TmEvalRel : forall (cl1 cl2 : (eval_ctxt * term)), Prop :=
 | TmEvalRel_appl : forall e t u,
-    TmEvalRel (e, t) (e, App t u)
+    TmEvalRel (pair e t) (pair e (App t u))
 | TmEvalRel_appr : forall e t u,
-    TmEvalRel (e, u) (e, App t u)
+    TmEvalRel (pair e u) (pair e (App t u))
 | TmEvalRel_hd : forall e e' t t' u v,
     TmEval e t (VAbs t' e') ->
     TmEval e u v ->
-    TmEvalRel (v ::: e', t') (e, App t u).
+    TmEvalRel (pair (v ::: e') t') (pair e (App t u)).
 
 Hint Constructors TmEvalRel.
 
 (* Well-founded by construction of the evaluation tree *)
 Theorem acc_tmeval : forall e t v,
     TmEval e t v ->
-    Acc TmEvalRel (e, t).
+    Acc TmEvalRel (pair e t).
 Proof.
   intros e t v h; induction h; constructor; intros [e1 t1] lt_t_t1;
     inversion lt_t_t1; subst; try congruence.
@@ -598,7 +616,7 @@ Definition eval_rel : red_triple -> red_triple -> Prop :=
     let ectx2 := red_ctx tr2 in
     let t1 := red_tm tr1 in
     let t2 := red_tm tr2 in
-    TmEvalRel (ectx1, t1) (ectx2, t2).
+    TmEvalRel (pair ectx1 t1) (pair ectx2 t2).
 
 (* We need a few lemmas from here if we're to prove anything... *)
 Require Import Wellfounded.
@@ -614,7 +632,7 @@ Proof.
 Defined.
 
 (* Gotta be reaaaal careful here to get a nice-lookign term *)
-Definition eval_triple : forall tr : red_triple, { v : value | TmEval (red_ctx tr) (red_tm tr) v }.
+Definition eval_triple : forall (tr : red_triple), { v : value | TmEval (red_ctx tr) (red_tm tr) v }.
   apply (Fix wf_triple).
   intros x eval_triple_rec.
   destruct x as [ectx t ?].
@@ -628,7 +646,8 @@ Definition eval_triple : forall tr : red_triple, { v : value | TmEval (red_ctx t
     + (* Can't happen because we have *some* value. *)
       exfalso.
       destruct red_correct0.
-      inversion t; congruence.
+      inversion t; subst; unfold some in *.
+      congruence.
   - (* evaluate t1 *)
     assert (val_t1 : { v | TmEval ectx t1 v }).
     + refine (eval_triple_rec {| red_ctx := ectx; red_tm := t1; red_correct := _ |} _ ).
@@ -659,7 +678,7 @@ Definition eval_triple : forall tr : red_triple, { v : value | TmEval (red_ctx t
 Defined.
 
 
-Definition eval_f (t : term) (ty : type)(well_typed : TyRel [] t ty) : value :=
+Definition eval_f (t : term) (ty : type)(well_typed : TyRel List.nil t ty) : value :=
   let triple := {| red_ctx := [::]; red_tm := t; red_correct := norm_f t ty well_typed |} in
   let v := eval_triple triple in
   proj1_sig v.
@@ -676,6 +695,7 @@ Proof.
   apply h.
 Qed.
 
+Require Import Extraction.
 
 (* Just to see what it's like *)
 Recursive Extraction eval_f.
