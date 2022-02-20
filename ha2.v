@@ -2,214 +2,105 @@
 
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
+Require Import ha2_syn.
 
-Inductive tm :=
-| v(name : string)
-| Succ(a : tm)
-| Z
-| Plus(a b : tm)
-| Times(a b : tm)
-.
+Notation "P ⇒ Q" := (Imp P Q)(at level 30, right associativity).
 
-Inductive pred :=
-(* Just unary predicates? *)
-| Atom : string -> tm -> pred
-(* Quantification over terms *)
-| Forallt : string -> pred -> pred
-(* Quantification over terms *)
-| ForallP : string -> pred -> pred
-| Impl : pred -> pred -> pred.
+Notation "t ∈ P" := (Mem t P)(at level 20, no associativity).
 
-Notation "P ⇒ Q" := (Impl P Q)(at level 30, right associativity).
+Notation "'FORALL' P" := (ForallP P)(at level 33).
+Notation "'all'  P" := (Forallt P) (at level 33).
 
-Notation "t ∈ X" := (Atom X t)(at level 20, no associativity).
+Notation "{{ '_' | P }}" := (Compr P)(at level 33).
 
-Notation "'FORALL' X , P" := (ForallP X P)(at level 33).
-Notation "'all' x , P" := (Forallt x P) (at level 33).
+Check (all var_tm 0 ∈ var_pred 0 ⇒ var_tm 0 ∈ var_pred 0).
+Check (var_tm 0 ∈ {{ _ | var_tm 0 ∈ var_pred 0 }}).
 
-Check (all "foo", v"foo" ∈ "Bar" ⇒ v"foo" ∈ "Bar").
+Definition PVal := fin -> fin -> Prop.
 
-Definition PVal := string -> nat -> Prop.
-
-Definition VVal := string -> nat.
-
-Definition extend{A} (f : string -> A) : string -> A -> (string -> A) :=
-  fun s a s' =>
-    if string_dec s s' then
-      a
-    else
-      f s'.
+Definition VVal := fin -> nat.
 
 Fixpoint eval_tm (vval : VVal) (t : tm) : nat :=
   match t with
-  | v x => vval x
+  | var_tm x => vval x
   | Succ t => S (eval_tm vval t)
   | Z => 0
-  | Plus t1 t2 => (eval_tm vval t1) + (eval_tm vval t2)
-  | Times t1 t2 => (eval_tm vval t1) * (eval_tm vval t2)
+  | Add t1 t2 => (eval_tm vval t1) + (eval_tm vval t2)
+  | Mult t1 t2 => (eval_tm vval t1) * (eval_tm vval t2)
   end.
 
-Fixpoint eval (pval : PVal) (vval : VVal) (P : pred) : Prop :=
+Definition default_pred := fun _ : nat => False.
+Definition default_prop := False.
+
+Fixpoint eval_pred (pval : PVal) (vval : VVal) (P : pred) : nat -> Prop :=
   match P with
-  | t ∈ X => (pval X) (eval_tm vval t)
-  | all x, P => forall n, eval pval (extend vval x n) P
-  | FORALL X, P => forall Pr, eval (extend pval X Pr) vval P
-  | P ⇒ Q => (eval pval vval P) -> (eval pval vval Q)
+  | var_pred X => pval X
+  | {{ _ | P }} => fun n => eval_prop pval (n, vval) P
+  end
+with eval_prop (pval : PVal) (vval : VVal) (P : prop) : Prop :=
+  match P with
+  | t ∈ P => (eval_pred pval vval P) (eval_tm vval t)
+  | all P => forall n, eval_prop pval (n, vval) P
+  | FORALL P => forall (Pr : nat -> Prop), eval_prop (Pr, pval) vval P
+  | P ⇒ Q => (eval_prop pval vval P) -> (eval_prop pval vval Q)
   end.
 
 Import ListNotations.
 
-Definition ctxt := list pred.
+Definition ctxt := list prop.
 
-Fixpoint free_pred_var (name : string) (P : pred) : bool :=
-  match P with
-  | _ ∈ X => eqb name X
-  | all x, P => free_pred_var name P
-  | FORALL X, P =>
-      if string_dec name X then
-        false
-      else free_pred_var name P
-  | P ⇒ Q => (free_pred_var name P) || (free_pred_var name Q)
-  end
-.
+Notation "t1 ≃ t2" := (FORALL t1 ∈ var_pred 0 ⇒ t2 ∈ var_pred 0) (at level 20).
 
-Fixpoint free_tm_var_tm (name : string) (t : tm) : bool :=
-  match t with
-  | v x => eqb x name
-  | Succ t => free_tm_var_tm name t
-  | Z => false
-  | Plus t1 t2 => (free_tm_var_tm name t1) || (free_tm_var_tm name t2)
-  | Times t1 t2 => (free_tm_var_tm name t1) || (free_tm_var_tm name t2)
-  end.
+Notation "∃ Q" := (FORALL (all Q ⇒ var_pred 0) ⇒ var_pred 0)(at level 10).
 
-Fixpoint free_tm_var (name : string) (P : pred) : bool :=
-  match P with
-  | t ∈ _ => free_tm_var_tm name t
-  | all x, P =>
-      if string_dec name x then
-        false
-      else free_tm_var name P
-  | FORALL X, P => free_tm_var name P
-  | P ⇒ Q => (free_tm_var name P) || (free_tm_var name Q)
-  end
-.
+Notation "⊥" := (FORALL all var_tm 0 ∈ var_pred 0).
+
+Definition lift_prop (Γ : ctxt) : ctxt :=
+  List.map (fun P => P⟨id;↑⟩) Γ.
+
+Definition lift_tm (Γ : ctxt) : ctxt :=
+  List.map (fun P => P⟨↑; id⟩) Γ.
 
 
-Fixpoint bound_tm_var (name : string) (P : pred) : bool :=
-  match P with
-  | _ ∈ _ => false
-  | all x, P => eqb x name || (bound_tm_var name P)
-  | FORALL X, P => bound_tm_var name P
-  | P ⇒ Q => (bound_tm_var name P) || (bound_tm_var name Q)
-  end.
-
-Fixpoint bound_pred_var (name : string) (P : pred) : bool :=
-  match P with
-  | _ ∈ _ => false
-  | all x, P => bound_pred_var name P
-  | FORALL X, P => (eqb X name) || bound_pred_var name P
-  | P ⇒ Q => (bound_pred_var name P) || (bound_pred_var name Q)
-  end.
-  
-
-Definition no_capture_tm (P : pred) (t : tm) : Prop :=
-  forall x, bound_tm_var x P = true -> free_tm_var_tm x t = false.
-
-Definition no_capture_prop (P : pred) (Q : pred) : Prop :=
-  (* We need a bunch of these conditions to avoid capture *)
-  (forall x, bound_tm_var x P = true -> bound_tm_var x Q = false)
-  /\
-    (forall x, bound_tm_var x Q = true -> free_tm_var x P = false)
-  /\
-    (forall x, bound_tm_var x P = true -> free_tm_var x Q = false)
-  /\
-    (* We only need this direction for predicate variables, since they
-       can't be free in terms. *)
-    (forall X, bound_pred_var X P = true -> free_pred_var X Q = false)
-.
-
-Definition free_pred name Γ := existsb (free_pred_var name) Γ.
-Definition free_tm name Γ := existsb (free_tm_var name) Γ.
-
-Fixpoint subst_tm_tm (t : tm) (x : string)(u : tm) :=
-  match t with
-  | v y => if string_dec x y then u else v y
-  | Succ t => Succ (subst_tm_tm t x u)
-  | Z => Z
-  | Plus t1 t2 => Plus (subst_tm_tm t1 x u) (subst_tm_tm t2 x u)
-  | Times t1 t2 => Times (subst_tm_tm t1 x u) (subst_tm_tm t2 x u)
-  end.
-
-Fixpoint subst_tm_pred (P : pred)(x : string)(u : tm) :=
-  match P with
-  | t ∈ X => subst_tm_tm t x u ∈ X
-  | all y, P =>
-      if string_dec x y then all y, P else all y, (subst_tm_pred P x u)
-  | FORALL X, P => FORALL X, (subst_tm_pred P x u)
-  | P ⇒ Q => (subst_tm_pred P x u) ⇒ (subst_tm_pred Q x u)
-  end.
-
-(* We'll use this to abstract over terms in predicates *)
-Definition pattern_var : string := "_".
-
-(* This is where we'll get full 2nd order comprehension *)
-Fixpoint subst_pred_pred (P : pred)(X : string)(Q : pred) :=
-  match P with
-  | t ∈ Y => if string_dec X Y then subst_tm_pred Q pattern_var t else P
-  | all y, P => all y, (subst_pred_pred P X Q)
-  | FORALL Y, P =>
-      if string_dec X Y then FORALL Y, P
-      else  FORALL Y, (subst_pred_pred P X Q)
-  | P1 ⇒ P2 => (subst_pred_pred P1 X Q) ⇒ (subst_pred_pred P2 X Q)
-  end.
-
-Notation "x # Γ" := (free_tm x Γ = false)(at level 30).
-Notation "X ## Γ" := (free_pred X Γ = false)(at level 30).
-
-Definition P : string := "P".
-Definition x : string := "x".
-Definition y : string := "y".
-
-Notation "t1 ≃ t2" := (FORALL P, t1 ∈ P ⇒ t2 ∈ P) (at level 20).
-
-Notation "∃ y , Q" := (FORALL P, (all y, Q ⇒ P) ⇒ P)(at level 10).
-
-Notation "⊥" := (FORALL P, all y, v y ∈ P).
-
-Inductive derives : ctxt -> pred -> Prop :=
+Inductive derives : ctxt -> prop -> Prop :=
 | axiom : forall Γ P, In P Γ -> derives Γ P
-| imp_intro : forall Γ P Q, derives (P::Γ) Q -> derives Γ (P ⇒ Q)
-| forallt_intro : forall Γ x P, x # Γ -> derives Γ P -> derives Γ (all x, P)
-| forallP_intro : forall Γ X P, X ## Γ -> derives Γ P -> derives Γ (FORALL X, P)
+| imp_intro : forall Γ P Q,
+    derives (P::Γ) Q -> derives Γ (P ⇒ Q)
+| forallt_intro : forall Γ P, derives (lift_tm Γ) P -> derives Γ (all P)
+| forallP_intro : forall Γ P,  derives (lift_prop Γ) P -> derives Γ (FORALL P)
 | imp_elim : forall Γ P Q, derives Γ (P ⇒ Q) -> derives Γ P -> derives Γ Q
-| forallt_elim : forall Γ P x t,
-    no_capture_tm P t ->
-    derives Γ (all x, P) -> derives Γ (subst_tm_pred P x t)
-| forallP_elim : forall Γ P X Q,
-    no_capture_prop P Q ->
-    derives Γ (FORALL X, P) -> derives Γ (subst_pred_pred P X Q)
-| zero_S : forall Γ, derives Γ (all y, Succ (v y) ≃ Z ⇒ ⊥)
+| forallt_elim : forall Γ (P : prop) (t : tm),
+    derives Γ (all P) -> derives Γ P[t..;ids]
+| forallP_elim : forall Γ P (Q : pred),
+    derives Γ (FORALL P) -> derives Γ P[ids; Q..]
+| compr_intro : forall Γ P (t : tm),
+    derives Γ P[t..;ids] ->
+    derives Γ (t ∈ {{ _ | P }})
+| compr_elim : forall Γ P (t : tm),
+    derives Γ (t ∈ {{ _ | P }}) ->
+    derives Γ P[t..;ids]
+| zero_S : forall Γ, derives Γ (all Succ (var_tm 0) ≃ Z ⇒ ⊥)
 | inj_S : forall Γ,
-    derives Γ (all x, all y, (Succ (v x)) ≃ (Succ (v y)) ⇒ (v x ≃ v y))
-| plus_Z : forall Γ, derives Γ (all x, Plus (v x) Z ≃ v x)
-| plus_S : forall Γ,
-    derives Γ (all x, all y, Plus (v x) (Succ (v y)) ≃ Succ (Plus (v x) (v y)))
-| times_Z : forall Γ, derives Γ (all x, Times (v x) Z ≃ Z)
+    derives Γ (all all (Succ (var_tm 1)) ≃ (Succ (var_tm 0)) ⇒ (var_tm 1 ≃ var_tm 0))
+| plus_Z : forall Γ, derives Γ (all Add (var_tm 0) Z ≃ var_tm 0)
+| plus_S : forall Γ, derives Γ (all all Add (var_tm 1) (Succ (var_tm 0)) ≃ Succ (Add (var_tm 1) (var_tm 0)))
+| times_Z : forall Γ, derives Γ (all Mult (var_tm 0) Z ≃ Z)
 | times_S : forall Γ,
-    derives Γ (all x, all y, Times (v x) (Succ (v y)) ≃ (Plus (v x) (Times (v x) (v y))))
-| ind : forall Γ,
-    derives Γ (FORALL P, Z ∈ P ⇒ (all x, v x ∈ P ⇒ (Succ (v x)) ∈ P) ⇒ all x, v x ∈ P)
+    derives Γ (all all Mult (var_tm 1) (Succ (var_tm 0)) ≃ (Add (var_tm 1) (Mult (var_tm 1) (var_tm 0))))
+(* We don't *need* this: we can just define a predicate Nat(n), List(n) etc. *)
+(* | ind : forall Γ, *)
+(*     derives Γ (FORALL Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ (Succ (var_tm 0)) ∈ var_pred 0) ⇒ all var_tm 0 ∈ var_pred 0) *)
 .
 
 
 Notation "Γ ⊢ P" := (derives Γ P)(at level 40).
 
 Definition validates(pval : PVal)(vval : VVal) (Γ : ctxt) : Prop :=
-  Forall (eval pval vval) Γ.
+  Forall (eval_prop pval vval) Γ.
 
-Definition models (Γ : ctxt)(P : pred) : Prop :=
+Definition models (Γ : ctxt)(P : prop) : Prop :=
   forall pval vval,
-    validates pval vval Γ -> eval pval vval P.
+    validates pval vval Γ -> eval_prop pval vval P.
 
 Notation "Γ ⊧ P" := (models Γ P)(at level 40).
 
@@ -220,19 +111,10 @@ Proof.
   firstorder.
 Qed.
 
-Lemma impl_iff : forall P Q R S : Prop,
+Lemma impl_iff : forall (P Q R S : Prop),
     (P <-> R) -> (Q <-> S) -> (P -> Q) <-> (R -> S).
 Proof.
   intuition.
-Qed.
-
-Lemma extend_subst_tm : forall t vval x u n,
-    eval_tm vval u = n ->
-    eval_tm vval (subst_tm_tm t x u) = eval_tm (extend vval x n) t.
-Proof.
-  induction t; intros; simpl; auto.
-  unfold extend.
-  destruct (string_dec x0 name); subst; auto.
 Qed.
 
 Lemma eval_tm_ext : forall t vval vval',
@@ -242,423 +124,363 @@ Proof.
   induction t; intros; simpl; auto.
 Qed.
 
+Scheme prop_pred_ind := Induction for prop Sort Prop
+    with pred_prop_ind := Induction for pred Sort Prop.
+
+Check prop_pred_ind.
+
+    
 Lemma eval_ext : forall P pval vval vval',
     (forall x, vval x = vval' x) ->
-    eval pval vval P <-> eval pval vval' P.
+    eval_prop pval vval P <-> eval_prop pval vval' P.
 Proof.
-  induction P0; intros; simpl.
-  - erewrite eval_tm_ext; eauto; reflexivity.
-  - apply forall_iff; intros.
-    eapply IHP0.
-    + intros; unfold extend.
-      rewrite<- H.
-      reflexivity.
-  - apply forall_iff; intros; eapply IHP0; now auto.
-  - rewrite IHP0_1 in *; try apply H.
-    rewrite IHP0_2 in *; try apply H.
-    reflexivity.
+  intros P.
+  induction P using prop_pred_ind with
+    (P0 := fun p => forall pval vval vval',
+               (forall x, vval x = vval' x) ->
+               forall n, eval_pred pval vval p n <-> eval_pred pval vval' p n); simpl; intros.
+  - erewrite eval_tm_ext; eauto.
+  - apply forall_iff; intro n.
+    apply (IHP pval (n, vval) (n, vval')).
+    destruct x; asimpl; auto.
+  - apply forall_iff; intro Pr.
+    apply IHP; destruct x; asimpl; auto.
+  - apply impl_iff; firstorder.
+  - reflexivity.
+  - apply IHP; destruct x; asimpl; auto.
 Qed.
 
 
 Lemma eval_ext' : forall P pval pval' vval,
     (forall X, pval X = pval' X) ->
-    eval pval vval P <-> eval pval' vval P.
+    eval_prop pval vval P <-> eval_prop pval' vval P.
 Proof.
-  induction P0; intros; simpl.
-  - erewrite H; reflexivity.
-  - apply forall_iff; intros; eapply IHP0; now auto.
-  - apply forall_iff; intros Pr; eapply IHP0.
-    intros X; unfold extend; destruct (string_dec s X); now auto.
-  - rewrite IHP0_1; eauto.
-    rewrite IHP0_2; eauto.
-    reflexivity.
+  intros P.
+  induction P using prop_pred_ind with
+    (P0 := fun p => forall pval pval' vval,
+               (forall x, pval x = pval' x) ->
+               forall n, eval_pred pval vval p n <-> eval_pred pval' vval p n); simpl; intros.
+  - eauto.
+  - apply forall_iff; intro n.
+    apply IHP;
+    destruct X; asimpl; auto.
+  - apply forall_iff; intro Pr.
+    apply IHP; destruct X; asimpl; auto.
+  - apply impl_iff; firstorder.
+  - rewrite H; reflexivity.
+  - apply IHP; destruct X; asimpl; auto.
 Qed.
+
+Check eval_prop.
+Print PVal.
 
 Lemma eval_ext'' : forall P pval pval' vval,
     (forall X n, pval X n <-> pval' X n) ->
-    eval pval vval P <-> eval pval' vval P.
+    eval_prop pval vval P <-> eval_prop pval' vval P.
 Proof.
-  induction P0; intros; simpl.
-  - erewrite eval_tm_ext; eauto; reflexivity.
-  - apply forall_iff; intros; eapply IHP0; now eauto.
-  - apply forall_iff; intros; eapply IHP0; intros.
-    unfold extend; destruct (string_dec s X); auto; reflexivity.
-  - rewrite IHP0_1; eauto.
-    rewrite IHP0_2; eauto.
-    reflexivity.
+  intros P.
+  induction P using prop_pred_ind with
+    (P0 := fun p => forall pval pval' vval,
+               (forall X n, pval X n <-> pval' X n) ->
+               forall n, eval_pred pval vval p n <-> eval_pred pval' vval p n); simpl; intros.
+  - auto.
+  - apply forall_iff; intro n.
+    apply IHP;
+    destruct X; asimpl; auto.
+  - apply forall_iff; intro Pr.
+    apply IHP; destruct X; asimpl; intros; auto; reflexivity.
+  - apply impl_iff; firstorder.
+  - rewrite H; reflexivity.
+  - apply IHP; destruct X; asimpl; auto.
 Qed.
 
 
-Lemma extend_commut : forall A s1 s2 a b (f : string -> A),
-    s1 <> s2 ->
-    forall s, extend (extend f s2 b) s1 a s = extend (extend f s1 a) s2 b s.
+Lemma eval_tm_ren : forall t vval ξ,
+    eval_tm vval t⟨ξ⟩ = eval_tm (ξ >> vval) t.
 Proof.
-  intros.
-  unfold extend.
-  destruct (string_dec s1 s);
-    destruct (string_dec s2 s); congruence.
+  induction t; simpl; asimpl; auto.
 Qed.
 
-Lemma extend_idem : forall A s1 s2 a b (f : string -> A),
-    s1 = s2 ->
-    forall s, extend (extend f s2 b) s1 a s = extend f s1 a s.
+Lemma eval_ren : forall P pval vval θ ξ,
+    eval_prop pval vval P⟨θ; ξ⟩ <-> eval_prop (ξ >> pval) (θ >> vval) P.
 Proof.
-  unfold extend.
-  intros.
-  destruct (string_dec s1 s); auto.
-  destruct (string_dec s2 s); auto.
-  congruence.
-Qed.
-
-Lemma no_capture_tm_forall : forall P x t,
-    no_capture_tm (all x, P) t -> no_capture_tm P t.
-Proof.
-  unfold no_capture_tm; simpl; intros.
-  apply H.
-  apply Bool.orb_true_intro; right; auto.
-Qed.
-
-Lemma no_capture_tm_imp_l : forall P Q t,
-    no_capture_tm (P ⇒ Q) t -> no_capture_tm P t.
-Proof.
-  unfold no_capture_tm; simpl; intros; apply H.
-  apply Bool.orb_true_intro; auto.
-Qed.
-
-Lemma no_capture_tm_imp_r : forall P Q t,
-    no_capture_tm (P ⇒ Q) t -> no_capture_tm Q t.
-Proof.
-  unfold no_capture_tm; simpl; intros; apply H.
-  apply Bool.orb_true_intro; auto.
-Qed.
-
-Hint Resolve no_capture_tm_imp_l no_capture_tm_imp_r.
-
-Lemma nfree_tm_extend_tm : forall t vval x n,
-    free_tm_var_tm x t = false ->
-    eval_tm vval t = eval_tm (extend vval x n) t.
-Proof.
-  induction t; simpl; auto;
-    intros vval s n.
-  - unfold extend; destruct (string_dec s name); subst; [| now auto].
-    rewrite eqb_refl; congruence.
-  - rewrite Bool.orb_false_iff.
-    intros [h1 h2].
-    now eauto.
-  - rewrite Bool.orb_false_iff.
-    intros [h1 h2].
-    now eauto.
-Qed.
-
-
-Lemma nfree_tm_extend_pred : forall P pval vval x n,
-    free_tm_var x P = false ->
-    eval pval vval P <-> eval pval (extend vval x n) P.
-Proof.
-  induction P0; simpl; intros.
-  - erewrite <- nfree_tm_extend_tm; now auto.
-  - split; intros h n'; destruct (string_dec x0 s); subst; auto.
-    + eapply eval_ext; [apply extend_idem; now auto| now auto].
-    + eapply eval_ext; [apply extend_commut; now auto|].
-      apply IHP0; now auto.
-    + assert (h' := h n'); clear h.
-      erewrite eval_ext in h'; [| eapply extend_idem; now auto].
-      auto.
-    + assert (h' := h n'); clear h.
-      erewrite eval_ext in h'; [| eapply extend_commut; now auto].
-      eapply IHP0; eauto.
-  - split; intros Pr h.
-    + apply IHP0; now auto.
-    + eapply IHP0; now auto.
-  - rewrite Bool.orb_false_iff in H; destruct H as [h1 h2].
-    erewrite IHP0_1; eauto.
-    erewrite IHP0_2; eauto.
-    reflexivity.
-Qed.
-
-Lemma nfree_pred_extend_pred : forall P pval vval X Q,
-    free_pred_var X P = false ->
-    eval pval vval P <-> eval (extend pval X Q) vval P.
-Proof.
-  induction P0; simpl; intros.
-  - unfold extend.
-    destruct string_dec; subst; try rewrite eqb_refl in *; try congruence.
-    reflexivity.
-  - split; intros h n'.
-    + erewrite<- IHP0; now eauto.
-    + erewrite IHP0; now eauto.
-  - split; intros Pr h; destruct (string_dec X s); subst; auto.
-    +  eapply eval_ext'; [apply extend_idem; now auto| now auto].
-    + eapply eval_ext'; [apply extend_commut; now auto|].
-      apply IHP0; auto.
-    + assert (h' := Pr h).
-      eapply eval_ext' in h';
-        [eapply h' | ].
-      intros; erewrite extend_idem; now eauto.
-    + rewrite IHP0; [| eauto].
-      eapply eval_ext'; [apply extend_commut; now auto|].
-      now eauto.
-  - rewrite Bool.orb_false_iff in H; destruct H as [h1 h2].
-    erewrite IHP0_1; eauto.
-    erewrite IHP0_2; eauto.
-    reflexivity.
-Qed.
-
-
-Lemma no_capture_tm_forall_extend : forall x P u t vval,
-    no_capture_tm (all x, P) t ->
-    eval_tm vval t = eval_tm (extend vval x u) t.
-Proof.
-  unfold no_capture_tm; simpl.
-  intros x P u; induction t; simpl; intros; auto.
-  - unfold extend.
-    assert (h := H name).
-    destruct (string_dec x); auto.
-    rewrite e in h.
-    rewrite eqb_refl in *.
-    rewrite Bool.orb_true_l in *.
-    firstorder; congruence.
-  - erewrite IHt1; eauto; try erewrite IHt2; eauto; intros; assert (h := H _ H0);
-      rewrite Bool.orb_false_iff in *; destruct h; now auto.
-  - erewrite IHt1; eauto; try erewrite IHt2; eauto; intros; assert (h := H _ H0);
-      rewrite Bool.orb_false_iff in *; destruct h; now auto.
-Qed.
-
-Lemma extend_subst : forall P pval vval x u n,
-    no_capture_tm P u ->
-    eval_tm vval u = n ->
-    eval pval vval (subst_tm_pred P x u) <-> eval pval (extend vval x n) P.
-Proof.
-  induction P0; intros; simpl.
-  - erewrite extend_subst_tm; now eauto.
-  - destruct (string_dec x0 s); subst; simpl.
-    + split; intros h n.
-      -- eapply eval_ext; [| apply h].
-         intros s'.
-         unfold extend.
-         destruct (string_dec s s'); eauto.
-      -- eapply eval_ext; [| apply h].
-         intros s'; unfold extend.
-         destruct (string_dec s s'); eauto.
-    + split; intros h n.
-      -- (* First, swap the extends! *)
-        assert (h_swap := extend_commut _ x0 s (eval_tm vval u) n vval n0).
-        eapply eval_ext; [symmetry; apply h_swap|].
-        eapply IHP0; eauto; [eapply no_capture_tm_forall; eauto|].
-        erewrite <- no_capture_tm_forall_extend; now eauto.
-      -- eapply IHP0; eauto; try eapply no_capture_tm_forall; eauto.
-         erewrite <- no_capture_tm_forall_extend; eauto.
-         assert (h_swap := extend_commut _ x0 s (eval_tm vval u) n vval n0).
-         eapply eval_ext; [apply h_swap|].
-         apply h; now auto.
-  - split; intros Pr h; eapply IHP0; eauto.
-  - rewrite IHP0_1; eauto;
-    rewrite IHP0_2; eauto; now eauto.
-Qed.
-
-
-Lemma extend_ext : forall pval X (P : nat -> Prop) P',
-    (forall n, P n <-> P' n) ->
-    forall Y m, extend pval X P Y m <-> extend pval X P' Y m.
-Proof.
-  unfold extend.
-  intros; destruct (string_dec X Y); simpl; auto; reflexivity.
-Qed.
-
-(* Wow this stings *)
-Lemma no_capture_prop_forall : forall P Q x, no_capture_prop (all x, P) Q -> no_capture_prop P Q.
-Proof.
-  unfold no_capture_prop; simpl.
-  ((intros P Q s1; intros (h1 & h2 & h3 & h4); repeat split; intros s2;
-    assert (h1' := h1 s2);
-    assert (h2' := h2 s2);
-    assert (h3' := h3 s2);
-    assert (h4' := h4 s2);
-    destruct (string_dec s1 s2) as [eq | neq];
-    subst;
-    ((try (rewrite eqb_refl in *));
-      simpl in *; intros; auto;
-      (try rewrite<- eqb_neq in *);
-       (try rewrite neq in *); simpl in *; auto))).
-     - rewrite H in *.
-       destruct (string_dec s2 s2); auto; try congruence.
-       assert (ex_falso := h1' (eq_refl true)).
-       congruence.
-     - rewrite H in *.
-       destruct (string_dec s2 s1); auto.
-       symmetry in e.
-       rewrite<- eqb_eq in *.
-       congruence.
-Qed.
-
-
-Lemma no_capture_prop_FORALL : forall P Q X, no_capture_prop (FORALL X, P) Q -> no_capture_prop P Q.
-Proof.
-  unfold no_capture_prop; simpl.
-  setoid_rewrite Bool.orb_true_iff.
-  firstorder.
-Qed.
-
-Lemma no_capture_prop_impl1 : forall P1 P2 Q,
-    no_capture_prop (P1 ⇒ P2) Q -> no_capture_prop P1 Q.
-Proof.
-  unfold no_capture_prop; simpl.
-  setoid_rewrite Bool.orb_true_iff.
-  setoid_rewrite Bool.orb_false_iff.
-  firstorder.
-Qed.
-
-Lemma no_capture_prop_impl2 : forall P1 P2 Q,
-    no_capture_prop (P1 ⇒ P2) Q -> no_capture_prop P2 Q.
-Proof.
-  unfold no_capture_prop; simpl.
-  setoid_rewrite Bool.orb_true_iff.
-  setoid_rewrite Bool.orb_false_iff.
-  firstorder.
-Qed.
-
-Lemma extend_subst' : forall P pval vval X Q,
-    no_capture_prop P Q ->
-    let V := fun n => eval pval (extend vval pattern_var n) Q in
-    eval pval vval (subst_pred_pred P X Q) <-> eval (extend pval X V) vval P.
-Proof.
-  induction P0; intros; simpl.
-  - unfold extend.
-    destruct (string_dec X s); simpl; try reflexivity.
-    subst.
-    unfold V.
-    rewrite extend_subst; [reflexivity | | reflexivity].
-    unfold no_capture_prop in H.
-    destruct H as [h1 [h2 [h3 h4]]].
-    now auto.
+  induction P using prop_pred_ind
+    with (P0 :=
+            fun p => forall pval vval θ ξ n,
+                eval_pred pval vval p⟨θ; ξ⟩ n <-> eval_pred (ξ >> pval) (θ >> vval) p n); simpl; intros.
+  - rewrite eval_tm_ren; auto.
   - apply forall_iff; intros n.
-    + pose (V' := (fun m => eval pval (extend (extend vval s n) pattern_var m) Q)).
-      assert (forall n, V n <-> V' n).
-      -- unfold V, V'.
-         intros.
-         destruct (string_dec s pattern_var).
-         ++ apply eval_ext; intros.
-            symmetry.
-            apply extend_idem; now auto.
-         ++
-           etransitivity.
-           { apply nfree_tm_extend_pred.
-             unfold no_capture_prop in H; destruct H as [h1 [h2 [h3 h4]]].
-             assert (h3' := h3 s).
-             simpl in h3'.
-             rewrite eqb_refl in *; simpl in h3'.
-             now auto. }
-           apply eval_ext; intros; apply extend_commut; now auto.
-      -- assert (h' := IHP0 pval (extend vval s n)).
-         assert (h'' := eval_ext'' P0 (extend pval X V) (extend pval X V')).
-         rewrite h''; [| apply extend_ext; now auto].
-         (* whew *)
-         apply h'.
-         now apply (no_capture_prop_forall _ _ _ H).
-  - destruct (string_dec X s) as [eq | neq]; simpl; apply forall_iff; intros Pr.
-    + apply eval_ext'; intros.
-      rewrite extend_idem; now auto.
-    + rewrite IHP0.
-      -- apply eval_ext''.
-         intros X' m.
-         rewrite extend_commut; [| now auto].
-         unfold extend.
-         destruct (string_dec s X'); [reflexivity |].
-         destruct (string_dec X X'); [| reflexivity].
-         unfold V.
-         replace (fun s' : string => if string_dec s s' then Pr else pval s') with (extend pval s Pr) by reflexivity.
-         replace (fun s' : string => if string_dec pattern_var s' then m else vval s') with (extend vval pattern_var m) by reflexivity.
-         rewrite<- nfree_pred_extend_pred; [reflexivity|].
-         destruct H as (h1 & h2 & h3 & h4).
-         apply h4.
-         simpl; rewrite eqb_refl; now auto.
-      -- eapply no_capture_prop_FORALL; now eauto.
-  - apply impl_iff.
-    + apply IHP0_1.
-      eapply no_capture_prop_impl1; now eauto.
-    + apply IHP0_2.
-      eapply no_capture_prop_impl2; now eauto.
+    asimpl.
+    rewrite IHP.
+    assert (forall x, ((0, θ >> S) >> (n, vval)) x = (n, θ >> vval) x) by (destruct x; auto).
+    apply eval_ext; auto.
+  - apply forall_iff; intros Pr.
+    asimpl.
+    rewrite IHP.
+    apply eval_ext'; destruct X; asimpl; auto.
+  - apply impl_iff; auto.
+  - asimpl; reflexivity.
+  - asimpl.
+    rewrite IHP.
+    eapply eval_ext; asimpl; auto.
 Qed.
 
-Print subst_pred_pred.
-
-Lemma validates_extend_nfree : forall Γ pval vval x n,
-    x # Γ ->
-    validates pval vval Γ ->
-    validates pval (extend vval x n) Γ.
+Lemma eval_ren_pred : forall p pval vval θ ξ n,
+    eval_pred pval vval p⟨θ; ξ⟩ n <-> eval_pred (ξ >> pval) (θ >> vval) p n.
 Proof.
-  induction Γ; simpl; intros pval vval s n nfree h; constructor.
-  - rewrite Bool.orb_false_iff in nfree; destruct nfree as [free1 free2].
-    inversion h; subst.
-    apply nfree_tm_extend_pred; now auto.
-  - inversion h; subst.
-    apply IHΓ; auto.
-    rewrite Bool.orb_false_iff in nfree; destruct nfree as [free1 free2].
+  (* No need to be fancy, since we already have the prop case. *)
+  induction p; simpl; intros; asimpl.
+  - reflexivity.
+  - rewrite eval_ren; asimpl; reflexivity.
+Qed.
+
+Lemma eval_tm_subst : forall t vval ξ,
+    eval_tm vval t[ξ] = eval_tm (fun n => eval_tm vval (ξ n)) t.
+Proof.
+  induction t; simpl; asimpl; auto.
+Qed.
+
+Lemma eval_ext2 : forall P pval pval' vval vval',
+    (forall n, pval n = pval' n) ->
+    (forall n, vval n = vval' n) ->
+    eval_prop pval vval P <-> eval_prop pval' vval' P.
+Proof.
+  intros; rewrite eval_ext; eauto.
+  rewrite eval_ext'; eauto; reflexivity.
+Qed.
+
+Lemma eval_ext2' : forall P pval pval' vval vval',
+    (forall n x, pval n x <-> pval' n x) ->
+    (forall n, vval n = vval' n) ->
+    eval_prop pval vval P <-> eval_prop pval' vval' P.
+Proof.
+  intros; rewrite eval_ext; eauto.
+  rewrite eval_ext''; eauto; reflexivity.
+Qed.
+
+Lemma eval_subst : forall P pval vval θ ξ,
+    eval_prop pval vval P[θ; ξ] <->
+      eval_prop (fun X => eval_pred pval vval (ξ X)) (fun n => eval_tm vval (θ n)) P.
+Proof.
+  induction P using prop_pred_ind
+    with (P0 :=
+            fun p => forall pval vval θ ξ n,
+                eval_pred pval vval p[θ; ξ] n <-> eval_pred (fun X => eval_pred pval vval (ξ X)) (fun n => eval_tm vval (θ n)) p n); simpl; intros.
+  - rewrite eval_tm_subst; auto.
+  - apply forall_iff; intros n.
+    asimpl.
+    rewrite IHP.
+    apply eval_ext2'; intros.
+    + apply eval_ren_pred.
+    + destruct n0; simpl; auto.
+      apply eval_tm_ren.
+  - apply forall_iff; intros Pr.
+    asimpl.
+    rewrite IHP.
+    apply eval_ext''; destruct X; intros; simpl; asimpl; [reflexivity |].
+    apply eval_ren_pred.
+  - apply impl_iff; auto.
+  - asimpl; reflexivity.
+  - asimpl.
+    rewrite IHP.
+    eapply eval_ext2'; asimpl; intros; simpl.
+    + apply eval_ren_pred.
+    + destruct n0; simpl; auto.
+      apply eval_tm_ren.
+Qed.
+
+
+Lemma lift_validates_tm : forall Γ pval vval n,
+    validates pval vval Γ ->
+    validates pval (n, vval) (lift_tm Γ).
+Proof.
+  induction Γ; unfold validates in *; setoid_rewrite Forall_forall; simpl; [contradiction |].
+  intros pval vval n ih Q [eq | mem]; subst.
+  - apply eval_ren; auto.
+  - setoid_rewrite Forall_forall in IHΓ.
     auto.
 Qed.
 
-Lemma validates_extend_nfree' : forall Γ pval vval X P,
-    X ## Γ ->
+
+Lemma lift_validates_prop : forall Γ pval vval P,
     validates pval vval Γ ->
-    validates (extend pval X P) vval Γ.
+    validates (P, pval) vval (lift_prop Γ).
 Proof.
-  induction Γ; simpl; intros pval vval s n nfree h; constructor.
-  - rewrite Bool.orb_false_iff in nfree; destruct nfree as [free1 free2].
-    inversion h; subst.
-    apply nfree_pred_extend_pred; auto.
-  - inversion h; subst.
-    apply IHΓ; auto.
-    rewrite Bool.orb_false_iff in nfree; destruct nfree as [free1 free2].
+  induction Γ; unfold validates in *; setoid_rewrite Forall_forall; simpl; [contradiction |].
+  intros pval vval n ih Q [eq | mem]; subst.
+  - apply eval_ren; asimpl; auto.
+  - setoid_rewrite Forall_forall in IHΓ.
     auto.
 Qed.
-  
 
-Hint Resolve validates_extend_nfree validates_extend_nfree'.
-    
+
 Theorem soundness : forall Γ P, Γ ⊢ P -> Γ ⊧ P.
 Proof.
   intros G P d; induction d.
-  - intro; unfold validates; intros.
+  - unfold "⊧".
+    unfold validates; intros.
     rewrite Forall_forall in *.
     apply H0; now auto.
   - intro; simpl.
     intros.
     apply IHd.
-    constructor; now auto.
+    unfold validates in *.
+    constructor; auto.
+  - unfold "⊧" in *; simpl; intros.
+    apply IHd.
+    apply lift_validates_tm; auto.
+  - unfold "⊧" in *; simpl; intros.
+    apply IHd.
+    apply lift_validates_prop; auto.
+  - unfold "⊧" in *; simpl in *; intros; auto.
+  - unfold "⊧" in *; simpl in *; intros; auto.
+    apply eval_subst.
+    assert (h : forall n, eval_tm vval (t.. n) = ((eval_tm vval (t.. 0)), vval) n).
+    { destruct n; asimpl; auto. }
+    eapply eval_ext; eauto.
+  - unfold "⊧" in *; simpl in *; intros; auto.
+    apply eval_subst.
+    assert (h : forall X, eval_pred pval vval (Q.. X) = ((eval_pred pval vval (Q.. 0)), pval) X) by (destruct X; asimpl; auto).
+    eapply eval_ext'; eauto.
+  - unfold "⊧" in *; simpl in *; intros; auto.
+    setoid_rewrite eval_subst in IHd.
+    assert (h : forall n, eval_tm vval (t.. n) = ((eval_tm vval (t.. 0)), vval) n)
+      by (destruct n; asimpl; auto).
+    eapply eval_ext; [symmetry; apply h|].
+    apply IHd; auto.
+  - unfold "⊧" in *; simpl in *; intros.
+    rewrite eval_subst; asimpl.
+    assert (h : forall n, eval_tm vval (t.. n) = ((eval_tm vval (t.. 0)), vval) n)
+      by (destruct n; asimpl; auto).
+    eapply eval_ext; [intros; asimpl; apply h|].
+    eapply IHd; auto.
   - unfold "⊧" in *; simpl in *.
-    intros; apply IHd; now auto.
-  - unfold "⊧" in *; simpl in *.
-    intros; apply IHd; now auto.
-  - unfold "⊧" in *; simpl in *.
-    now auto.
-  - unfold "⊧" in *; simpl in *.
-    intros pval vval h.
-    eapply extend_subst; now eauto.
-  - unfold "⊧" in *; simpl in *.
-    intros pval vval h;
-    eapply extend_subst'; now eauto.
-  - unfold "⊧" in *; simpl in *.
-    unfold extend; simpl.
     intros; exfalso.
     assert (h := H0 (fun n => n <> 0)); simpl in h.
     destruct h; now auto.
   - unfold "⊧" in *; simpl in *.
-    unfold extend; simpl; intros.
+    simpl; intros.
     assert (h := H0 (fun k => Pr (Nat.pred k))); simpl in h; now auto.
   - unfold "⊧" in *; simpl in *.
-    unfold extend; simpl; intros.
+    simpl; intros.
     replace (n + 0) with n in H0 by auto; now auto.
   - unfold "⊧" in *; simpl in *.
-    unfold extend; simpl; intros.
+    simpl; intros.
     replace (n + S n0) with (S (n + n0)) in H0 by auto; now auto.
   - unfold "⊧" in *; simpl in *.
-    unfold extend; simpl; intros.
+    simpl; intros.
     replace (n * 0) with 0 in H0 by auto; now auto.
   - unfold "⊧" in *; simpl in *.
-    unfold extend; simpl; intros.
+    simpl; intros.
     Require Import Lia.
     replace (n * S n0) with (n + n * n0) in H0 by lia; now auto.
-  - unfold "⊧" in *; simpl in *.
-    unfold extend; simpl; intros.
-    induction n; now auto.
+  (* - unfold "⊧" in *; simpl in *. *)
+  (*   simpl; intros. *)
+  (*   induction n; now auto. *)
 Qed.
+
+Definition eq_dec_tm : forall (t1 t2 : tm), { t1 = t2 } + { t1 <> t2 }.
+  decide equality.
+  decide equality.
+Defined.
+
+(* TODO: build some "patternization" so that you can turn terms into substitutions *)
+Definition tm_pattern_at_tm (u : tm) : tm -> tm.
+Abort.
+
+Definition tm_pattern_at (u : tm) : pred -> pred.
+Admitted.
+
+Theorem tm_pattern_at_subst : forall t P, P = (tm_pattern_at t P)[t..;ids].
+Abort.
+
+(* This section is useful if we want to avoid an induction *axiom*,
+   and use a relative predicate everywhere instead. it has some
+   advantages in formalizing realizability. *)
+Section Nat_prfs.
+Definition Nat (t : tm) := FORALL Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ (Succ (var_tm 0)) ∈ var_pred 0) ⇒ t ∈ var_pred 0.
+
+Theorem Succ_Nat : forall Γ,
+    Γ ⊢ all Nat (var_tm 0) ⇒ Nat (Succ (var_tm 0)).
+Proof.
+  intros ?; apply forallt_intro.
+  apply imp_intro.
+  apply forallP_intro.
+  repeat apply imp_intro.
+  apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
+  - replace (var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) with
+      ((var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)[(var_tm 0)..; ids]) by auto.
+    eapply forallt_elim.
+    apply axiom; left; auto.
+  - unfold Nat.
+    apply imp_elim with (P := (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)); [ | apply axiom; left; auto].
+    apply imp_elim with (P := Z ∈ var_pred 0); [ | apply axiom; right; left; auto].
+    replace (Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0) with
+    ((Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
+    eapply forallP_elim.
+    unfold lift_prop; simpl; asimpl.
+    apply axiom; right; right; left; auto.
+Qed.
+
+End Nat_prfs.
+
+Theorem eq_refl : forall Γ t, Γ ⊢ t ≃ t.
+Proof.
+  intros; apply forallP_intro; apply imp_intro.
+  eapply axiom; left; now auto.
+Qed.
+
+Lemma eq_symm_aux : forall (t1 t2 : nat),
+    (forall (P : nat -> Prop), P t1 -> P t2) -> (forall (P : nat -> Prop), P t2 -> P t1).
+Proof.
+  intros t1 t2 h P.
+  apply (h (fun n => P n -> P t1)).
+  intros h'; exact h'.
+Qed.
+
+
+Theorem eq_symm : forall Γ,
+    Γ ⊢ all all var_tm 1 ≃ var_tm 0 ⇒ var_tm 0 ≃ var_tm 1.
+Proof.
+  intros; repeat apply forallt_intro; apply imp_intro;
+    apply forallP_intro; simpl; asimpl.
+  pose (S := {{ _ | var_tm 0 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0}}).
+  apply imp_elim with (P := (var_tm 1 ∈ var_pred 0 ⇒ var_tm 0 ∈ var_pred 0)[ids; S..]).
+  - unfold S.
+    asimpl.
+    apply imp_intro.
+    (* This ain't fun *)
+    replace (var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0) with
+      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0)[(var_tm 0)..; ids]) by auto.
+    apply compr_elim.
+    eapply imp_elim; [apply axiom; left; eauto|].
+    apply compr_intro; asimpl.
+    apply imp_intro; apply axiom; left; auto.
+  - eapply forallP_elim; apply axiom; left; auto.
+Qed.
+
+Theorem eq_trans : forall Γ,
+    Γ ⊢ all all all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ var_tm 2 ⇒ var_tm 0 ≃ var_tm 2.
+Proof.
+  intro Γ.
+  repeat apply forallt_intro.
+  repeat apply imp_intro.
+  apply forallP_intro.
+  apply imp_intro.
+  unfold lift_prop; simpl; asimpl.
+  apply imp_elim with (P := var_tm 1 ∈ var_pred 0).
+  - replace (var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0) with
+      ((var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
+    apply forallP_elim.
+    apply axiom; right; left; auto.
+  - apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
+    + replace (var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0) with
+      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
+      apply forallP_elim.
+      apply axiom; right; right; left; auto.
+    + apply axiom; left; auto.
+Qed.
+
+
+(* TODO: Embedding of Coq predicates into ha2. *)
+(* TODO: Realizability of ha2 predicates by system F terms. *)
