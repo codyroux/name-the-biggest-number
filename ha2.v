@@ -2,7 +2,7 @@
 
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
-Require Import ha2_syn.
+Require Export ha2_syn.
 
 Notation "P ⇒ Q" := (Imp P Q)(at level 30, right associativity).
 
@@ -51,7 +51,7 @@ Definition ctxt := list prop.
 
 Notation "t1 ≃ t2" := (FORALL t1 ∈ var_pred 0 ⇒ t2 ∈ var_pred 0) (at level 20).
 
-Notation "∃ Q" := (FORALL (all Q ⇒ var_pred 0) ⇒ var_pred 0)(at level 10).
+Notation "∃ Q" := (FORALL all (all Q ⇒ var_tm 1 ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0)(at level 10).
 
 Notation "⊥" := (FORALL all var_tm 0 ∈ var_pred 0).
 
@@ -62,8 +62,8 @@ Definition lift_tm (Γ : ctxt) : ctxt :=
   List.map (fun P => P⟨↑; id⟩) Γ.
 
 
-Inductive derives : ctxt -> prop -> Prop :=
-| axiom : forall Γ P, In P Γ -> derives Γ P
+Inductive derives : ctxt -> prop -> Type :=
+| axiom : forall n Γ P, List.nth_error Γ n = Init.Datatypes.Some P -> derives Γ P
 | imp_intro : forall Γ P Q,
     derives (P::Γ) Q -> derives Γ (P ⇒ Q)
 | forallt_intro : forall Γ P, derives (lift_tm Γ) P -> derives Γ (all P)
@@ -313,6 +313,7 @@ Proof.
     auto.
 Qed.
 
+Search (List.nth_error).
 
 Theorem soundness : forall Γ P, Γ ⊢ P -> Γ ⊧ P.
 Proof.
@@ -320,7 +321,8 @@ Proof.
   - unfold "⊧".
     unfold validates; intros.
     rewrite Forall_forall in *.
-    apply H0; now auto.
+    apply nth_error_In in e.
+    apply H; now auto.
   - intro; simpl.
     intros.
     apply IHd.
@@ -411,15 +413,15 @@ Proof.
   - replace (var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) with
       ((var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)[(var_tm 0)..; ids]) by auto.
     eapply forallt_elim.
-    apply axiom; left; auto.
+    apply (axiom 0); auto.
   - unfold Nat.
-    apply imp_elim with (P := (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)); [ | apply axiom; left; auto].
-    apply imp_elim with (P := Z ∈ var_pred 0); [ | apply axiom; right; left; auto].
+    apply imp_elim with (P := (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)); [ | apply (axiom 0); auto].
+    apply imp_elim with (P := Z ∈ var_pred 0); [ | apply (axiom 1); auto].
     replace (Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0) with
     ((Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
     eapply forallP_elim.
     unfold lift_prop; simpl; asimpl.
-    apply axiom; right; right; left; auto.
+    apply (axiom 2); auto.
 Qed.
 
 End Nat_prfs.
@@ -427,7 +429,7 @@ End Nat_prfs.
 Theorem eq_refl : forall Γ t, Γ ⊢ t ≃ t.
 Proof.
   intros; apply forallP_intro; apply imp_intro.
-  eapply axiom; left; now auto.
+  apply (axiom 0); now auto.
 Qed.
 
 Lemma eq_symm_aux : forall (t1 t2 : nat),
@@ -453,10 +455,10 @@ Proof.
     replace (var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0) with
       ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0)[(var_tm 0)..; ids]) by auto.
     apply compr_elim.
-    eapply imp_elim; [apply axiom; left; eauto|].
+    eapply imp_elim; [apply (axiom 0); now eauto|].
     apply compr_intro; asimpl.
-    apply imp_intro; apply axiom; left; auto.
-  - eapply forallP_elim; apply axiom; left; auto.
+    apply imp_intro; apply (axiom 0); auto.
+  - eapply forallP_elim; apply (axiom 0); auto.
 Qed.
 
 Theorem eq_trans : forall Γ,
@@ -472,13 +474,13 @@ Proof.
   - replace (var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0) with
       ((var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
     apply forallP_elim.
-    apply axiom; right; left; auto.
+    apply (axiom 1); auto.
   - apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
     + replace (var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0) with
       ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
       apply forallP_elim.
-      apply axiom; right; right; left; auto.
-    + apply axiom; left; auto.
+      apply (axiom 2); auto.
+    + apply (axiom 0); auto.
 Qed.
 
 

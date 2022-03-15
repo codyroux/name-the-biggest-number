@@ -99,7 +99,7 @@ Record interp(Syn : Type) :=
   {
   def : Syn;
   reify : Syn -> type -> term Syn;
-  eval : term Syn -> { tp : type & interp_type Syn tp }
+  eval : Syn -> { tp : type & interp_type Syn tp }
   }.
 
 Definition interp_term: forall {Syn} (r : interp Syn) (e: list {tp: type & interp_type Syn tp}) (t: term Syn),
