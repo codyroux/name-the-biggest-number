@@ -22,6 +22,8 @@ Notation "[[ P ]]" := (prop_to_ty P).
 Variable dummy_inhab_pred : pred -> term.
 Variable dummy_inhab_prop : prop -> term.
 
+(* We're stuck here in general: if Q is not closed, there are not
+necessarily any such terms. *)
 Axiom dummy_inhab_pred_tyrel : forall Γ Q, TyRel Γ (dummy_inhab_pred Q) (pred_to_ty Q).
 Axiom dummy_inhab_prop_tyrel : forall Γ Q, TyRel Γ (dummy_inhab_prop Q) (prop_to_ty Q).
 

@@ -386,15 +386,46 @@ Definition eq_dec_tm : forall (t1 t2 : tm), { t1 = t2 } + { t1 <> t2 }.
   decide equality.
 Defined.
 
-(* TODO: build some "patternization" so that you can turn terms into substitutions *)
-Definition tm_pattern_at_tm (u : tm) : tm -> tm.
-Abort.
+(* build some "patternization" so that you can turn terms into substitutions. *)
+Fixpoint tm_pattern_at_tm (u : tm) (t : tm) : tm :=
+  if eq_dec_tm u t then var_tm 0 else
+    match t with
+    | var_tm n => var_tm (shift n)
+    | Z => t
+    | Succ t' => Succ (tm_pattern_at_tm u t')
+    | Add t1 t2 => Add (tm_pattern_at_tm u t1) (tm_pattern_at_tm u t2)
+    | Mult t1 t2 => Mult (tm_pattern_at_tm u t1) (tm_pattern_at_tm u t2)
+    end.
 
-Definition tm_pattern_at (u : tm) : pred -> pred.
-Admitted.
+Lemma tm_pattern_at_tm_subst : forall u t, t = (tm_pattern_at_tm u t)[u..].
+Proof.
+  intros u t;
+    pose (t' := t).
+  revert u; induction t; intros u;
+  case_eq (eq_dec_tm u t'); intros e h; unfold t' in h; simpl; try rewrite h; asimpl; auto.
+  - f_equal; auto.
+  - f_equal; auto.
+  - f_equal; auto.
+Qed.
+
+Fixpoint tm_pattern_at (u : tm) (P : prop) : prop :=
+  match P with
+  | n ∈ P => tm_pattern_at_tm u n ∈ P⟨↑; id⟩
+  | FORALL P => FORALL (tm_pattern_at u P)
+  | P ⇒ Q => (tm_pattern_at u P) ⇒ (tm_pattern_at u Q)
+  (* Fixme: handle these cases? *)
+  | _ => P⟨↑; id⟩
+  end.
+
 
 Theorem tm_pattern_at_subst : forall t P, P = (tm_pattern_at t P)[t..;ids].
-Abort.
+Proof.
+  induction P; try (unfold tm_pattern_at; simpl; asimpl; now auto).
+  - unfold tm_pattern_at; asimpl; f_equal; apply tm_pattern_at_tm_subst.
+  - simpl; asimpl; f_equal; auto.
+  - simpl; asimpl; f_equal; auto.
+Qed.
+
 
 (* This section is useful if we want to avoid an induction *axiom*,
    and use a relative predicate everywhere instead. it has some
@@ -410,8 +441,7 @@ Proof.
   apply forallP_intro.
   repeat apply imp_intro.
   apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
-  - replace (var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) with
-      ((var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)[(var_tm 0)..; ids]) by auto.
+  - rewrite (tm_pattern_at_subst (var_tm 0)); simpl.
     eapply forallt_elim.
     apply (axiom 0); auto.
   - unfold Nat.
@@ -451,10 +481,8 @@ Proof.
   - unfold S.
     asimpl.
     apply imp_intro.
-    (* This ain't fun *)
-    replace (var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0) with
-      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0)[(var_tm 0)..; ids]) by auto.
-    apply compr_elim.
+    rewrite (tm_pattern_at_subst (var_tm 0)); simpl.
+    apply compr_elim; asimpl; unfold shift.
     eapply imp_elim; [apply (axiom 0); now eauto|].
     apply compr_intro; asimpl.
     apply imp_intro; apply (axiom 0); auto.
