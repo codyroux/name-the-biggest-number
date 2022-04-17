@@ -51,7 +51,8 @@ Definition ctxt := list prop.
 
 Notation "t1 ≃ t2" := (FORALL t1 ∈ var_pred 0 ⇒ t2 ∈ var_pred 0) (at level 20).
 
-Notation "∃ Q" := (FORALL all (all Q ⇒ var_tm 1 ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0)(at level 10).
+(* notionally: ∃ x, Q(x) := ∀ P, (∀ x, Q(x) ⇒ P) ⇒ P *)
+Notation "∃ Q" := (FORALL (all Q⟨id; ↑⟩ ⇒ all var_tm 0 ∈ var_pred 0) ⇒ all var_tm 0 ∈ var_pred 0)(at level 10).
 
 Notation "⊥" := (FORALL all var_tm 0 ∈ var_pred 0).
 
@@ -397,6 +398,20 @@ Fixpoint tm_pattern_at_tm (u : tm) (t : tm) : tm :=
     | Mult t1 t2 => Mult (tm_pattern_at_tm u t1) (tm_pattern_at_tm u t2)
     end.
 
+Lemma tm_pattern_at_tm_unfold : forall t u,
+    tm_pattern_at_tm u t =
+      if eq_dec_tm u t then var_tm 0 else
+        match t with
+        | var_tm n => var_tm (shift n)
+        | Z => t
+        | Succ t' => Succ (tm_pattern_at_tm u t')
+        | Add t1 t2 => Add (tm_pattern_at_tm u t1) (tm_pattern_at_tm u t2)
+        | Mult t1 t2 => Mult (tm_pattern_at_tm u t1) (tm_pattern_at_tm u t2)
+        end.
+Proof.
+  intros; destruct t; reflexivity.
+Qed.
+
 Lemma tm_pattern_at_tm_subst : forall u t, t = (tm_pattern_at_tm u t)[u..].
 Proof.
   intros u t;
@@ -511,6 +526,236 @@ Proof.
     + apply (axiom 0); auto.
 Qed.
 
+Lemma tm_pattern_at_impl : forall P Q u, tm_pattern_at u (P ⇒ Q) = (tm_pattern_at u P) ⇒ (tm_pattern_at u Q).
+Proof.
+  intros; reflexivity.
+Qed.
 
-(* TODO: Embedding of Coq predicates into ha2. *)
-(* TODO: Realizability of ha2 predicates by system F terms. *)
+Lemma tm_pattern_at_eq : forall t1 t2 u, tm_pattern_at u (t1 ≃ t2) = (tm_pattern_at_tm u t1) ≃ (tm_pattern_at_tm u t2).
+Proof.
+  intros; reflexivity.
+Qed.
+
+Ltac pattac u := (rewrite (tm_pattern_at_subst u); repeat rewrite tm_pattern_at_impl, tm_pattern_at_eq).
+
+Ltac pattmtac t u := rewrite (tm_pattern_at_tm_subst t u).
+
+Lemma sym_apply : forall Γ t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t2 ≃ t1.
+Proof.
+  intros.
+  apply imp_elim with (P := t1 ≃ t2); auto.
+  Check eq_symm.
+  replace (t1 ≃ t2 ⇒ t2 ≃ t1) with (t1⟨↑⟩ ≃ var_tm 0 ⇒ var_tm 0 ≃ t1⟨↑⟩)[t2..; ids] by (asimpl; auto).
+  apply forallt_elim.
+  replace (all t1 ⟨↑⟩ ≃ var_tm 0 ⇒ var_tm 0 ≃ t1 ⟨↑⟩) with ((all var_tm 1 ≃ var_tm 0 ⇒ var_tm 0 ≃ var_tm 1)[t1..;ids]) by (asimpl; auto).
+  apply forallt_elim.
+  apply eq_symm.
+Qed.
+
+Lemma subst_ren : forall t ξ, t⟨ξ⟩ = t[ξ >> var_tm].
+Proof.
+  induction t; simpl; asimpl; auto; intros; f_equal; try rewrite IHt1; try rewrite IHt2; auto.
+Qed.
+
+Lemma trans_apply : forall Γ t1 t2 t3,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t2 ≃ t3 -> Γ ⊢ t1 ≃ t3.
+Proof.
+  intros.
+  apply imp_elim with (P := t2 ≃ t3); auto.
+  apply imp_elim with (P := t1 ≃ t2); auto.
+  Check eq_trans.
+  replace (t1 ≃ t2 ⇒ t2 ≃ t3 ⇒ t1 ≃ t3) with (var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩)[t1..;ids] by (asimpl; auto); apply forallt_elim.
+  replace (all var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩) with (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ t3⟨↑⟩⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩⟨↑⟩)[t2..;ids] by
+    (asimpl; repeat rewrite <- subst_ren; auto).
+  apply forallt_elim.
+  replace (all (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ t3 ⟨↑⟩ ⟨↑⟩ ⇒ var_tm 0 ≃ t3 ⟨↑⟩ ⟨↑⟩)) with
+    (all (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ var_tm 2 ⇒ var_tm 0 ≃ var_tm 2))[t3..;ids] by (asimpl; auto).
+  apply forallt_elim.
+  apply eq_trans.
+Qed.
+
+
+
+Lemma succ_eq :  forall Γ, Γ ⊢ all all var_tm 0 ≃ var_tm 1 ⇒ Succ (var_tm 0) ≃ Succ (var_tm 1).
+Proof.
+  intros.
+  repeat apply forallt_intro.
+  apply imp_intro.
+  Locate "≃".
+  pattac (var_tm 1).
+  eapply compr_elim.
+  rewrite tm_pattern_at_eq; simpl.
+  apply imp_elim with (P := var_tm 0 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})).
+  - replace (var_tm 0 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})
+                 ⇒ var_tm 1 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}}))
+      with
+      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0)[ids; ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})..]) by
+      (asimpl; auto).
+    apply forallP_elim.
+    apply (axiom 0); auto.
+
+  - apply compr_intro.
+    asimpl; simpl.
+    apply eq_refl.
+Qed.
+
+
+(* Probably simplify a lot by moving this up! *)
+Lemma eq_subst : forall Γ P t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ P[t1..;ids] -> Γ ⊢ P[t2..;ids].
+Proof.
+  intros.
+  apply compr_elim.
+  apply imp_elim with (P := t1 ∈ {{ _ | P }}).
+  - replace (t1 ∈ ({{ _ | P}}) ⇒ t2 ∈ ({{ _ | P}})) with
+      (t1 ∈ var_pred 0 ⇒ t2 ∈ var_pred 0)[ids; {{_ | P}}..] by (asimpl; auto).
+    apply forallP_elim; auto.
+  - apply compr_intro; auto.
+Qed.
+
+
+Lemma eq_subt_tm_aux : forall Γ t, Γ ⊢ all all var_tm 0 ≃ var_tm 1 ⇒ t[(var_tm 0)..] ≃ t[(var_tm 1)..].
+Proof.
+  intros.
+  repeat apply forallt_intro.
+  apply imp_intro.
+  replace (t[(var_tm 0)..] ≃ t[(var_tm 1)..]) with
+    (t[(var_tm 0)..]⟨↑⟩ ≃ t)[(var_tm 1)..; ids] by (asimpl; auto).
+  eapply eq_subst.
+  - apply (axiom 0); simpl; eauto.
+  - asimpl.
+    apply eq_refl.
+Qed.
+
+    
+Lemma eq_subt_tm : forall Γ t t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t[t1..] ≃ t[t2..].
+Proof.
+  intros.
+  (* eapply imp_elim; [| apply H]. *)
+  replace (t[t1..] ≃ t[t2..]) with
+    (t[t1..]⟨↑⟩ ≃ t⟨↑⟩[(var_tm 0)..] )[t2..; ids] by (asimpl; auto).
+  eapply eq_subst; eauto.
+  asimpl.
+  apply eq_refl.
+Qed.
+
+
+Locate "=".
+Print eq.
+
+Search Logic.eq_refl.
+Print EqdepFacts.
+
+Lemma eq_dec_eq : forall t, eq_dec_tm t t = left (Logic.eq_refl _).
+Proof.
+  intros t.
+  destruct (eq_dec_tm t t).
+  - f_equal.
+    Check Eqdep_dec.K_dec_type.
+    pattern e at 1.
+    apply Eqdep_dec.K_dec_type; auto.
+    apply eq_dec_tm.
+  - destruct n; auto.
+Qed.
+
+
+Lemma eq_dec_neq : forall t1 t2, t1 <> t2 -> {H | eq_dec_tm t1 t2 = right H}.
+Proof.
+  intros t1 t2 neq.
+  destruct (eq_dec_tm t1 t2); try congruence.
+  exists n; auto.
+Qed.
+        
+
+Lemma tm_pattern_at_tm_eq : forall t, tm_pattern_at_tm t t = var_tm 0.
+Proof.
+  intros t.
+  destruct t; unfold tm_pattern_at_tm; rewrite eq_dec_eq; auto.
+Qed.
+
+
+Lemma succ_apply : forall Γ t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ Succ t1 ≃ Succ t2.
+Proof.
+  intros.
+  pattmtac t1 (Succ t1); simpl.
+  edestruct (eq_dec_neq t1 (Succ t1)) as (?, e).
+  - clear H;
+    induction t1; try congruence.
+  - rewrite e.
+    rewrite tm_pattern_at_tm_eq.
+  pattmtac t2 (Succ t2); simpl.
+  edestruct (eq_dec_neq t2 (Succ t2)) as (?, e').
+  + clear H;
+    induction t2; try congruence.
+  + rewrite e'.
+    rewrite tm_pattern_at_tm_eq.
+    apply eq_subt_tm; auto.
+Qed.
+
+(* Exactly Coq.Sorting.Permutation, but in type *)
+Require Import List.
+Import ListNotations.
+
+Check [].
+
+Inductive Permutation {A : Type} : list A -> list A -> Type :=
+| perm_nil: Permutation nil nil
+| perm_skip x l l' : Permutation l l' -> Permutation (x::l) (x::l')
+| perm_swap x y l : Permutation (y::x::l) (x::y::l)
+| perm_trans l l' l'' :
+    Permutation l l' -> Permutation l' l'' -> Permutation l l''.
+
+Require Import Arith.
+
+Let adapt f n :=
+ let m := f (S n) in if le_lt_dec m (f 0) then m else Nat.pred m.
+
+Lemma perm_nth_error : forall A (l l' : list A), Permutation l l' -> { f : fin -> fin | forall n, nth_error l' n = nth_error l (f n) }.
+Proof.
+  intros A l l' p; induction p.
+  - exists id.
+    intros; simpl; auto.
+  - destruct IHp as (f & ih).
+    exists (0, f >> ↑).
+    induction n; unfold ">>"; simpl; auto.
+  - exists (1, 0, ↑ >> ↑ ).
+    destruct n; simpl; auto.
+    destruct n; simpl; auto.
+  - destruct IHp1 as (f & ihf).
+    destruct IHp2 as (g & ihg).
+    exists (g >> f); unfold ">>"; intros; simpl; auto.
+    rewrite ihg.
+    rewrite ihf; auto.
+Qed.
+
+Theorem ctx_perm : forall Γ P, Γ ⊢ P -> forall Γ', Permutation Γ' Γ -> Γ' ⊢ P.
+Proof.
+  intros Γ P prf; induction prf; intros.
+  - destruct (perm_nth_error _ _ _ H) as (f & h).
+    apply (axiom (f n)).
+    rewrite <- h; auto.
+  - admit.
+  - admit.
+  - admit.
+  - admit.
+  - admit.
+  - admit.
+  - admit.
+  - admit.
+  - now constructor.
+  - now constructor.
+  - now constructor.
+  - now constructor.
+  - now constructor.
+  - now constructor.
+Admitted.
+  
+
+Lemma weakening : forall Γ P Q, Γ ⊢ P -> (Q::Γ) ⊢ P.
+Proof.
+  intros Γ P Q prf; revert Q; induction prf.
+Admitted.
+  
