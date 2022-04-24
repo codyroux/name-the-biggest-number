@@ -384,3 +384,21 @@ Proof.
   rewrite eval_ren in H0; asimpl in *.
   auto.
 Qed.
+
+Theorem and_intro : forall Γ P Q, Γ ⊢ P ⇒ Q ⇒ P ∧ Q.
+Abort.
+
+Theorem and_elim1 : forall Γ P Q, Γ ⊢ P ∧ Q ⇒ P.
+Abort.
+
+Theorem and_elim2 : forall Γ P Q, Γ ⊢ P ∧ Q ⇒ Q.
+Abort.
+
+Theorem or_intro1 : forall Γ P Q, Γ ⊢ P ⇒ P ∨ Q.
+Abort.
+
+Theorem or_intro2 : forall Γ P Q, Γ ⊢ Q ⇒ P ∨ Q.
+Abort.
+
+Theorem or_elim : forall Γ P Q R, Γ ⊢ P ⇒ R -> Γ ⊢ Q ⇒ R -> Γ ⊢ P ∨ Q ⇒ R.
+Abort.

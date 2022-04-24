@@ -1,7 +1,7 @@
 (* A relatively straightforward formalization of HA^2 *)
 
-Require Import Coq.Lists.List.
-Require Import Coq.Strings.String.
+(* Require Import Coq.Lists.List. *)
+(* Require Import Coq.Strings.String. *)
 Require Export ha2_syn.
 
 Notation "P ⇒ Q" := (Imp P Q)(at level 30, right associativity).
@@ -45,7 +45,9 @@ with eval_prop (pval : PVal) (vval : VVal) (P : prop) : Prop :=
   | P ⇒ Q => (eval_prop pval vval P) -> (eval_prop pval vval Q)
   end.
 
-Import ListNotations.
+Definition None {A : Type} := @Datatypes.None A.
+
+Definition Some {A : Type} := @Datatypes.Some A.
 
 Definition ctxt := list prop.
 
@@ -64,7 +66,7 @@ Definition lift_tm (Γ : ctxt) : ctxt :=
 
 
 Inductive derives : ctxt -> prop -> Type :=
-| axiom : forall n Γ P, List.nth_error Γ n = Init.Datatypes.Some P -> derives Γ P
+| axiom : forall n Γ P, List.nth_error Γ n = Some P -> derives Γ P
 | imp_intro : forall Γ P Q,
     derives (P::Γ) Q -> derives Γ (P ⇒ Q)
 | forallt_intro : forall Γ P, derives (lift_tm Γ) P -> derives Γ (all P)
@@ -130,7 +132,7 @@ Scheme prop_pred_ind := Induction for prop Sort Prop
 
 Check prop_pred_ind.
 
-    
+
 Lemma eval_ext : forall P pval vval vval',
     (forall x, vval x = vval' x) ->
     eval_prop pval vval P <-> eval_prop pval vval' P.
@@ -172,8 +174,6 @@ Proof.
   - apply IHP; destruct X; asimpl; auto.
 Qed.
 
-Check eval_prop.
-Print PVal.
 
 Lemma eval_ext'' : forall P pval pval' vval,
     (forall X n, pval X n <-> pval' X n) ->
@@ -628,7 +628,7 @@ Proof.
     apply eq_refl.
 Qed.
 
-    
+
 Lemma eq_subt_tm : forall Γ t t1 t2,
     Γ ⊢ t1 ≃ t2 -> Γ ⊢ t[t1..] ≃ t[t2..].
 Proof.
@@ -642,18 +642,11 @@ Proof.
 Qed.
 
 
-Locate "=".
-Print eq.
-
-Search Logic.eq_refl.
-Print EqdepFacts.
-
 Lemma eq_dec_eq : forall t, eq_dec_tm t t = left (Logic.eq_refl _).
 Proof.
   intros t.
   destruct (eq_dec_tm t t).
   - f_equal.
-    Check Eqdep_dec.K_dec_type.
     pattern e at 1.
     apply Eqdep_dec.K_dec_type; auto.
     apply eq_dec_tm.
@@ -667,7 +660,7 @@ Proof.
   destruct (eq_dec_tm t1 t2); try congruence.
   exists n; auto.
 Qed.
-        
+
 
 Lemma tm_pattern_at_tm_eq : forall t, tm_pattern_at_tm t t = var_tm 0.
 Proof.
@@ -696,10 +689,10 @@ Proof.
 Qed.
 
 (* Exactly Coq.Sorting.Permutation, but in type *)
-Require Import List.
-Import ListNotations.
+(* Require Import List. *)
+(* Import ListNotations. *)
 
-Check [].
+(* Check []. *)
 
 Inductive Permutation {A : Type} : list A -> list A -> Type :=
 | perm_nil: Permutation nil nil
@@ -707,6 +700,8 @@ Inductive Permutation {A : Type} : list A -> list A -> Type :=
 | perm_swap x y l : Permutation (y::x::l) (x::y::l)
 | perm_trans l l' l'' :
     Permutation l l' -> Permutation l' l'' -> Permutation l l''.
+
+Hint Constructors Permutation.
 
 Require Import Arith.
 
@@ -731,31 +726,443 @@ Proof.
     rewrite ihf; auto.
 Qed.
 
+Lemma map_perm : forall A A' l l' (f : A -> A'), Permutation l l' -> Permutation (list_map f l) (list_map f l').
+Proof.
+  intros until f.
+  intro p; induction p; simpl; eauto.
+Qed.
+
 Theorem ctx_perm : forall Γ P, Γ ⊢ P -> forall Γ', Permutation Γ' Γ -> Γ' ⊢ P.
 Proof.
-  intros Γ P prf; induction prf; intros.
+  intros Γ P prf; induction prf; intros; try (econstructor; now eauto).
   - destruct (perm_nth_error _ _ _ H) as (f & h).
     apply (axiom (f n)).
     rewrite <- h; auto.
-  - admit.
-  - admit.
-  - admit.
-  - admit.
-  - admit.
-  - admit.
-  - admit.
-  - admit.
-  - now constructor.
-  - now constructor.
-  - now constructor.
-  - now constructor.
-  - now constructor.
-  - now constructor.
-Admitted.
-  
+  - apply forallt_intro.
+    apply IHprf; apply map_perm; auto.
+  - apply forallP_intro.
+    apply IHprf; apply map_perm; auto.
+Qed.
+
 
 Lemma weakening : forall Γ P Q, Γ ⊢ P -> (Q::Γ) ⊢ P.
 Proof.
-  intros Γ P Q prf; revert Q; induction prf.
-Admitted.
-  
+  intros Γ P Q prf; revert Q; induction prf; try (econstructor; now eauto); intros.
+  - apply (axiom (S n)); simpl; auto.
+  - constructor.
+    eapply ctx_perm; [apply IHprf | eauto].
+Qed.
+
+
+Inductive Match (A : Type) :=
+| Empty : Match A
+| Fail : Match A
+| Success : A -> Match A.
+
+Arguments Empty {A}.
+Arguments Fail {A}.
+Arguments Success {A}.
+
+
+Require Import Coq.Classes.EquivDec.
+
+Generalizable Variable A.
+
+Instance eqdec_tm : EqDec tm eq.
+Proof.
+  unfold EqDec.
+  apply eq_dec_tm.
+Qed.
+
+
+Definition join `{EqDec A eq} (l r : Match A) : Match A :=
+  match pair l r with
+  | pair Empty r => r
+  | pair l Empty => l
+  | pair (Success t1) (Success t2) => if t1 == t2 then Success t1 else Fail
+  | pair Fail _ => Fail
+  | pair _ Fail => Fail
+  end.
+
+Eval compute in (Add (var_tm 0) (var_tm 1))[Z..].
+
+
+(* Slight generalization of scons *)
+Definition ncons {X : Type}{var : Var fin X} (level : fin) (x : X) (xi : fin -> X) :=
+  fun n =>
+    if n <? level then var n
+    else if n =? level then x
+         else xi (Nat.pred n).
+
+Lemma ncons_0 : forall X (Vinst : Var fin X) x xi k,
+    ncons 0 x xi k = scons x xi k.
+Proof.
+  intros; unfold ncons.
+  assert (eq : k <? 0 = false) by auto.
+  rewrite eq.
+  destruct k; auto.
+Qed.
+
+Lemma ncons_scons : forall k level u, (var_tm 0, ncons level u ids >> ren_tm ↑) k = ncons (↑ level) u⟨↑⟩ ids k.
+Proof.
+  destruct k; try (unfold ncons; simpl; now auto).
+  intros; asimpl.
+  unfold ncons, "↑"; simpl.
+  destruct (Nat.ltb_spec k level).
+  - assert (h : S k <? S level = true) by (apply Nat.ltb_lt; lia).
+    rewrite h; simpl; auto.
+  - assert (h : S k <? S level = false) by (apply Nat.ltb_ge; lia); rewrite h; simpl.
+    destruct (Nat.eqb_spec k level); simpl; auto.
+    erewrite Nat.lt_succ_pred; eauto.
+    assert (level < k) by lia; eauto.
+Qed.
+
+Print option_map.
+
+Print option.
+Definition option_map2  {A B C : Type} : (A -> B -> C) -> (option A -> option B -> option C) :=
+  fun f oa ob =>
+    match pair oa ob return option C with
+    | pair Init.Datatypes.None _ => None
+    | pair _ Init.Datatypes.None => None
+    | pair (Init.Datatypes.Some a) (Init.Datatypes.Some b) => Some (f a b)
+    end.
+
+Fixpoint lower_tm (level : fin) (t : tm) : option tm := 
+  match t with
+  | var_tm v => if v <? level then None else Some (var_tm (v - level))
+  | Z => Some Z
+  | Succ t' => option_map Succ (lower_tm level t')
+  | Add t1 t2 => option_map2 Add (lower_tm level t1) (lower_tm level t2)
+  | Mult t1 t2 => option_map2 Mult (lower_tm level t1) (lower_tm level t2)
+  end.
+
+Check Nat.iter.
+
+Definition lift_tm_n (level : fin) (t : tm) : tm :=
+  t⟨Nat.iter level ↑⟩.
+
+Lemma lift_tm_n_0 : forall t, lift_tm_n 0 t = t.
+Proof.
+  unfold lift_tm_n; intros.
+  unfold Nat.iter; simpl.
+  replace (fun x : fin => x) with (@id fin) by reflexivity; asimpl; auto.
+Qed.
+
+Hint Rewrite lift_tm_n_0.
+
+Lemma iter_level_up : forall level n, Nat.iter level ↑ n = n + level.
+Proof.
+  induction level; unfold "↑"; simpl; auto.
+  intros; rewrite IHlevel.
+  auto.
+Qed.
+
+Lemma lower_zero : forall t, lower_tm 0 t = Some t.
+Proof.
+  induction t; simpl; try rewrite IHt; try rewrite IHt1, IHt2; auto.
+  repeat f_equal; lia.
+Qed.
+
+Lemma lower_lift : forall t level, lower_tm level (lift_tm_n level t) = Some t.
+Proof.
+  induction t; auto.
+  - intros; unfold lift_tm_n; simpl; rewrite iter_level_up.
+    assert (h : n + level <? level = false) by (rewrite Nat.ltb_ge; lia); rewrite h.
+    repeat f_equal; lia.
+  - simpl; intros; rewrite IHt.
+    simpl; auto.
+  - simpl; intros; rewrite IHt1; rewrite IHt2; simpl; auto.
+  - simpl; intros; rewrite IHt1; rewrite IHt2; simpl; auto.
+Qed.
+
+Lemma lift_lower : forall t u level, lower_tm level t = Some u -> lift_tm_n level u = t.
+Proof.
+  induction t; simpl; auto.
+  - intros u level; destruct (Nat.ltb_spec n level); [intros h; inversion h|].
+    intros e; inversion e; subst.
+    unfold lift_tm_n; asimpl; rewrite iter_level_up.
+    f_equal; lia.
+  - intros ? ? e; inversion e; subst; simpl; auto.
+  - intros u level.
+    case_eq (lower_tm level t); simpl; [ | intros ? h; inversion h].
+    intros u' eq1 eq2; inversion eq2; subst.
+    unfold lift_tm_n; asimpl.
+    f_equal; apply IHt; auto.
+  - intros u level; case_eq (lower_tm level t1); case_eq (lower_tm level t2);
+      try (intros ? eq1 ? eq2; try inversion eq1; try inversion eq2); [| intros eq1 eq2; subst; intros eq; inversion eq]. (* ugh *)
+    rewrite eq1, eq2; unfold option_map2; simpl.
+    intros eq; inversion eq; subst.
+    unfold lift_tm_n; asimpl; f_equal; [apply IHt1 | apply IHt2]; auto.
+  - intros u level; case_eq (lower_tm level t1); case_eq (lower_tm level t2);
+      try (intros ? eq1 ? eq2; try inversion eq1; try inversion eq2); [| intros eq1 eq2; subst; intros eq; inversion eq]. (* ugh *)
+    rewrite eq1, eq2; unfold option_map2; simpl.
+    intros eq; inversion eq; subst.
+    unfold lift_tm_n; asimpl; f_equal; [apply IHt1 | apply IHt2]; auto.
+Qed.
+
+Hint Resolve lift_lower.
+
+Definition match_var (level : fin) (v : fin) (t : tm) : Match tm :=
+  if v <? level then
+    match t with
+    | var_tm v' => if v =? v' then Empty
+                   else Fail
+    | _ => Fail
+    end
+  else if v =? level then
+         match lower_tm level t with
+         | Init.Datatypes.Some t =>  Success t
+         | None => Fail
+         end
+       else
+         match t with
+         | var_tm v' => if v =? shift v' then Empty
+                        else Fail
+         | _ => Fail
+         end.
+
+Eval compute in (match_var 0 1 (var_tm 1)).
+Eval compute in (match_var 0 0 (var_tm 1)).
+Eval compute in (match_var 3 0 (var_tm 0)).
+Eval compute in (match_var 1 1 (var_tm 2)).
+Eval compute in (match_var 1 2 (var_tm 1)).
+Eval compute in (match_var 1 2 (var_tm 2)).
+Eval compute in (match_var 1 2 (var_tm 0)).
+
+(*
+  We want:
+  match_tm (Add (var_tm 0) (var_tm 1)) (Add Z (var_tm 0)) = Success Z
+*)
+Fixpoint match_tm (level : fin) (p : tm) (t : tm) : Match tm :=
+  match pair p t with
+  | pair (var_tm v) t' => match_var level v t
+  | pair Z Z => Empty
+  | pair (Succ p') (Succ t') => match_tm level p' t'
+  | pair (Add p1 p2) (Add t1 t2) =>
+      join (match_tm level p1 t1) (match_tm level p2 t2)
+  | pair (Mult p1 p2) (Mult t1 t2) =>
+      join (match_tm level p1 t1) (match_tm level p2 t2)
+  | _ => Fail
+  end.
+
+Eval compute in match_tm 0 (Add Z (var_tm 1)) (Add Z (var_tm 0)).
+Eval compute in match_tm 0 (Add (var_tm 0) (var_tm 1)) (Add Z (var_tm 0)).
+Eval compute in (Add (var_tm 0) (var_tm 1))[Z..].
+Eval compute in (var_tm 0)⟨ncons 0 1 id⟩.
+Eval compute in (Add Z (var_tm 0))⟨ncons 0 1 id⟩.
+
+Lemma match_var_subst_empty : forall v t level u, match_var level v t = Empty -> (var_tm v)[ncons level u ids] = t.
+Proof.
+  intros v t level.
+  unfold match_var.
+  destruct (Nat.ltb_spec v level).
+  - destruct t; try congruence.
+    destruct (Nat.eqb_spec v n); try congruence; auto.
+    unfold ncons.
+    subst; rewrite <- (Nat.ltb_lt) in *.
+    asimpl.
+    rewrite H; simpl; auto.
+  - destruct (Nat.eqb_spec v level); try congruence.
+    + destruct (lower_tm level t); try congruence.
+    + intros u; destruct t; try congruence;
+        destruct (Nat.eqb_spec v (↑ n0)); try congruence; subst; asimpl.
+      intros _; unfold ncons.
+      rewrite <- Nat.ltb_ge in *.
+      rewrite H; simpl; auto.
+      destruct level; auto.
+      assert (h : n0 =? level = false) by (destruct (Nat.eqb_spec n0 level); unfold "↑" in *; lia).
+      rewrite h; auto.
+Qed.
+
+Lemma match_var_subst_success : forall v t u level, match_var level v t = Success u -> (var_tm v)[ncons level (lift_tm_n level u) ids] = t.
+Proof.
+  intros v t u level;
+    unfold match_var.
+  destruct (Nat.ltb_spec v level).
+  - destruct t; try congruence; destruct (Nat.eqb_spec v n); congruence.
+  - destruct (Nat.eqb_spec v level).
+    + case_eq (lower_tm level t); [| congruence].
+      intros ? eqt equ; inversion equ; subst; unfold ncons; asimpl.
+      destruct (Nat.ltb_spec level level); [ lia |].
+      rewrite Nat.eqb_refl; auto.
+    + destruct t; try congruence.
+      destruct (v =? ↑ n0); congruence.
+Qed.
+
+
+(* Lemma match_var_subst_success : forall v t u level, match_var level v t = Success u -> (var_tm v)[ncons level u ids] = t. *)
+(* Proof. *)
+(*   intros v t u level; *)
+(*     unfold match_var. *)
+(*   destruct (Nat.ltb_spec v level). *)
+(*   - destruct t; try congruence; destruct (Nat.eqb_spec v n); congruence. *)
+(*   - destruct (Nat.eqb_spec v level). *)
+(*     + intros eq; inversion eq; subst; unfold ncons; asimpl. *)
+(*       destruct (Nat.ltb_spec level level); [ lia |]. *)
+(*       rewrite Nat.eqb_refl; auto. *)
+(*     + destruct t; try congruence. *)
+(*       destruct (v =? ↑ n0); congruence. *)
+(* Qed. *)
+
+Lemma join_empty_l : forall s1 s2, join s1 s2 = Empty -> s1 = Empty.
+Proof.
+  destruct s1; destruct s2; unfold join; simpl; try congruence.
+  destruct (t == t0); simpl; congruence.
+Qed.
+
+Lemma join_empty_r : forall s1 s2, join s1 s2 = Empty -> s2 = Empty.
+Proof.
+  destruct s1; destruct s2; unfold join; simpl; try congruence.
+  destruct (t == t0); simpl; congruence.
+Qed.
+
+Lemma join_success : forall s1 s2 u, join s1 s2 = Success u -> (s1 = Empty /\ s2 = Success u) \/ (s1 = Success u /\ s2 = Empty) \/ (s1 = Success u /\ s2 = Success u).
+Proof.
+  destruct s1; destruct s2 ; unfold join; simpl; try congruence; auto.
+  intros; destruct (t == t0); intros; try congruence; auto.
+  right; right; auto; split; congruence.
+Qed.
+
+
+Hint Resolve match_var_subst_empty match_var_subst_success join_empty_l join_empty_r.
+
+
+Theorem match_tm_subst_empty : forall p t level u, match_tm level p t = Empty -> p[ncons level u ids] = t.
+Proof.
+  induction p; induction t; simpl; try congruence; auto; intros.
+  - asimpl; f_equal; auto.
+  - asimpl; f_equal.
+    + apply IHp1; eauto.
+    + apply IHp2; eauto.
+  - asimpl; f_equal.
+    + apply IHp1; eauto.
+    + apply IHp2; eauto.
+Qed.
+
+Theorem match_tm_subst_success : forall p t u level, match_tm level p t = Success u -> p[ncons level (lift_tm_n level u) ids] = t.
+Proof.
+  induction p; induction t; simpl; try congruence; auto.
+  - asimpl; intros; f_equal; auto.
+  - intros; asimpl; f_equal; destruct (join_success _ _ _ H) as [(H1 , H2)| [(H1, H2) | (H1, H2)]]; try apply match_tm_subst_empty, IHp1, IHp2; auto.
+    + apply match_tm_subst_empty; auto.
+    + apply match_tm_subst_empty; auto.
+  - intros; asimpl; f_equal; destruct (join_success _ _ _ H) as [(H1 , H2)| [(H1, H2) | (H1, H2)]]; try apply match_tm_subst_empty, IHp1, IHp2; auto.
+    + apply match_tm_subst_empty; auto.
+    + apply match_tm_subst_empty; auto.
+Qed.
+
+(* Theorem match_tm_subst_success : forall p t u level, match_tm level p t = Success u -> p[ncons level u ids] = t. *)
+(* Proof. *)
+(*   induction p; induction t; simpl; try congruence; auto. *)
+(*   - asimpl; intros; f_equal; auto. *)
+(*   - intros; asimpl; f_equal; destruct (join_success _ _ _ H) as [(H1 , H2)| [(H1, H2) | (H1, H2)]]; try apply match_tm_subst_empty, IHp1, IHp2; auto. *)
+(*     + apply match_tm_subst_empty; auto. *)
+(*     + apply match_tm_subst_empty; auto. *)
+(*   - intros; asimpl; f_equal; destruct (join_success _ _ _ H) as [(H1 , H2)| [(H1, H2) | (H1, H2)]]; try apply match_tm_subst_empty, IHp1, IHp2; auto. *)
+(*     + apply match_tm_subst_empty; auto. *)
+(*     + apply match_tm_subst_empty; auto. *)
+(* Qed. *)
+
+
+Fixpoint match_prop level (p : prop) (t : prop) {struct p} : Match tm :=
+  match pair p t with
+  | pair (n ∈ P) (m ∈ Q) => join (match_tm level n m) (match_pred level P Q)
+  | pair (P1 ⇒ P2) (Q1 ⇒ Q2) => join (match_prop level P1 Q1) (match_prop level P2 Q2)
+  | pair (FORALL P) (FORALL Q) => match_prop level P Q
+  | pair (all P) (all Q) => match_prop (↑ level) P Q
+  | _ => Fail
+  end
+with match_pred level (p : pred) (t : pred) {struct p} : Match tm :=
+       match pair p t with
+       | pair ({{ _ | P}}) ({{ _ | Q }}) => match_prop (↑ level) P Q
+       | pair (var_pred n) (var_pred m) =>
+           if n =? m then Empty
+           else Fail
+       | _ => Fail
+       end.
+
+Eval compute in match_tm 0 (Add (var_tm 0) (var_tm 1)) (Add (var_tm 1) (var_tm 0)).
+
+Eval compute in match_prop 0 (Add (var_tm 0) (var_tm 1) ∈ var_pred 0) (Add (var_tm 1) (var_tm 0) ∈ var_pred 0).
+
+Eval compute in match_prop 0 (all (Add (var_tm 0) (var_tm 1) ∈ var_pred 0)) (all (Add (var_tm 0) Z ∈ var_pred 0)).
+
+Eval compute in match_prop 0 (all (Add (var_tm 0) (var_tm 1) ∈ var_pred 0)) (all (Add (var_tm 0) (var_tm 1) ∈ var_pred 0)).
+
+Eval compute in match_prop 0 (all (Add (var_tm 0) (var_tm 1) ∈ var_pred 0)) (all (Add (var_tm 0) (var_tm 0) ∈ var_pred 0)).
+
+Eval compute in (all (Add (var_tm 0) (var_tm 1) ∈ var_pred 0))[(var_tm 1)..; ids] : prop.
+
+Eval compute in (all (Add (var_tm 0) (var_tm 1) ∈ var_pred 0))[(var_tm 0)..; ids] : prop.
+
+Theorem match_subst_empty : forall P Q level u, match_prop level P Q = Empty -> P[ncons level u ids; ids] = Q.
+Proof.
+  induction P using prop_pred_ind with
+    (P0 := fun p => forall Q level u, match_pred level p Q = Empty -> p[ncons level u ids; ids] = Q); destruct Q; simpl; try congruence; asimpl; intros.
+  - f_equal; eauto.
+    rewrite match_tm_subst_empty with (t := t0); eauto.
+  - erewrite ext_prop ; [|intros;  apply ncons_scons | reflexivity].
+    erewrite IHP; eauto.
+  - asimpl; erewrite IHP; auto.
+  - asimpl; erewrite IHP1, IHP2; eauto.
+  - destruct (Nat.eqb_spec n n0); congruence.
+  - asimpl; erewrite ext_prop ; [|intros;  apply ncons_scons | reflexivity].
+    erewrite IHP; auto.
+Qed.
+
+Theorem match_subst_empty' : forall P Q level u, match_pred level P Q = Empty -> P[ncons level u ids; ids] = Q.
+Proof.
+  intros; destruct P; asimpl in *.
+  - destruct Q; simpl in *; try congruence.
+    destruct (Nat.eqb_spec n n0); congruence.
+  - destruct Q; simpl in *; try congruence.
+    erewrite ext_prop ; [|intros;  apply ncons_scons | reflexivity].
+    erewrite match_subst_empty; eauto.
+Qed.
+
+
+Lemma lift_tm_lift : forall level t, (lift_tm_n level t)⟨↑⟩ = lift_tm_n (↑ level) t.
+Proof.
+  intros; unfold lift_tm_n.
+  asimpl.
+  apply extRen_tm.
+  induction x; simpl; auto.
+Qed.
+
+Theorem match_subst_success : forall P Q level t, match_prop level P Q = Success t -> P[ncons level (lift_tm_n level t) ids; ids] = Q.
+Proof.
+  induction P using prop_pred_ind with
+    (P0 := fun p => forall Q level t, match_pred level p Q = Success t -> p[ncons level (lift_tm_n level t) ids; ids] = Q);
+    destruct Q; simpl; try congruence; asimpl; intros.
+  - destruct (join_success _ _ _ H) as [(H1, H2) | [(H1, H2) | (H1, H2)]].
+    + f_equal; [apply match_tm_subst_empty; auto |].
+      apply IHP; auto.
+    + f_equal; [apply match_tm_subst_success; auto |apply match_subst_empty'; auto].
+    + f_equal; [apply match_tm_subst_success; auto | ].
+      apply IHP; auto.
+  - erewrite ext_prop ; [|intros; apply ncons_scons | reflexivity].
+    rewrite lift_tm_lift.
+    rewrite IHP with (Q := Q); eauto.
+  - asimpl; erewrite IHP; eauto.
+  - destruct (join_success _ _ _ H) as [(H1, H2) | [(H1, H2) | (H1, H2)]].
+    + erewrite match_subst_empty; eauto.
+      erewrite IHP2; auto.
+    + erewrite IHP1; eauto.
+      erewrite match_subst_empty; eauto.
+    + erewrite IHP1; eauto; erewrite IHP2; eauto.
+  - destruct (Nat.eqb_spec n n0); congruence.
+  - erewrite ext_prop ; [|intros;  apply ncons_scons | reflexivity].
+    rewrite lift_tm_lift.
+    erewrite IHP; eauto.
+Qed.
+
+(* Only first order for now :| *)
+Lemma apply_forallt : forall Γ P Q t, match_prop 0 P Q = Success t -> Γ ⊢ all P -> Γ ⊢ Q.
+Proof.
+  intros.
+  rewrite <- (match_subst_success _ _ _ _ H).
+  rewrite lift_tm_n_0.
+  erewrite ext_prop; [| intros; rewrite ncons_0; eauto | reflexivity].
+  apply forallt_elim; auto.
+Qed.
