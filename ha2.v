@@ -65,7 +65,7 @@ Definition lift_tm (Γ : ctxt) : ctxt :=
   List.map (fun P => P⟨↑; id⟩) Γ.
 
 
-Inductive derives : ctxt -> prop -> Type :=
+Inductive derives : ctxt -> prop -> Prop :=
 | axiom : forall n Γ P, List.nth_error Γ n = Some P -> derives Γ P
 | imp_intro : forall Γ P Q,
     derives (P::Γ) Q -> derives Γ (P ⇒ Q)
@@ -322,8 +322,8 @@ Proof.
   - unfold "⊧".
     unfold validates; intros.
     rewrite Forall_forall in *.
-    apply nth_error_In in e.
-    apply H; now auto.
+    apply nth_error_In in H.
+    apply H0; now auto.
   - intro; simpl.
     intros.
     apply IHd.
@@ -441,91 +441,6 @@ Proof.
   - simpl; asimpl; f_equal; auto.
 Qed.
 
-
-(* This section is useful if we want to avoid an induction *axiom*,
-   and use a relative predicate everywhere instead. it has some
-   advantages in formalizing realizability. *)
-Section Nat_prfs.
-Definition Nat (t : tm) := FORALL Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ (Succ (var_tm 0)) ∈ var_pred 0) ⇒ t ∈ var_pred 0.
-
-Theorem Succ_Nat : forall Γ,
-    Γ ⊢ all Nat (var_tm 0) ⇒ Nat (Succ (var_tm 0)).
-Proof.
-  intros ?; apply forallt_intro.
-  apply imp_intro.
-  apply forallP_intro.
-  repeat apply imp_intro.
-  apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
-  - rewrite (tm_pattern_at_subst (var_tm 0)); simpl.
-    eapply forallt_elim.
-    apply (axiom 0); auto.
-  - unfold Nat.
-    apply imp_elim with (P := (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)); [ | apply (axiom 0); auto].
-    apply imp_elim with (P := Z ∈ var_pred 0); [ | apply (axiom 1); auto].
-    replace (Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0) with
-    ((Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
-    eapply forallP_elim.
-    unfold lift_prop; simpl; asimpl.
-    apply (axiom 2); auto.
-Qed.
-
-End Nat_prfs.
-
-Theorem eq_refl : forall Γ t, Γ ⊢ t ≃ t.
-Proof.
-  intros; apply forallP_intro; apply imp_intro.
-  apply (axiom 0); now auto.
-Qed.
-
-Lemma eq_symm_aux : forall (t1 t2 : nat),
-    (forall (P : nat -> Prop), P t1 -> P t2) -> (forall (P : nat -> Prop), P t2 -> P t1).
-Proof.
-  intros t1 t2 h P.
-  apply (h (fun n => P n -> P t1)).
-  intros h'; exact h'.
-Qed.
-
-
-Theorem eq_symm : forall Γ,
-    Γ ⊢ all all var_tm 1 ≃ var_tm 0 ⇒ var_tm 0 ≃ var_tm 1.
-Proof.
-  intros; repeat apply forallt_intro; apply imp_intro;
-    apply forallP_intro; simpl; asimpl.
-  pose (S := {{ _ | var_tm 0 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0}}).
-  apply imp_elim with (P := (var_tm 1 ∈ var_pred 0 ⇒ var_tm 0 ∈ var_pred 0)[ids; S..]).
-  - unfold S.
-    asimpl.
-    apply imp_intro.
-    rewrite (tm_pattern_at_subst (var_tm 0)); simpl.
-    apply compr_elim; asimpl; unfold shift.
-    eapply imp_elim; [apply (axiom 0); now eauto|].
-    apply compr_intro; asimpl.
-    apply imp_intro; apply (axiom 0); auto.
-  - eapply forallP_elim; apply (axiom 0); auto.
-Qed.
-
-Theorem eq_trans : forall Γ,
-    Γ ⊢ all all all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ var_tm 2 ⇒ var_tm 0 ≃ var_tm 2.
-Proof.
-  intro Γ.
-  repeat apply forallt_intro.
-  repeat apply imp_intro.
-  apply forallP_intro.
-  apply imp_intro.
-  unfold lift_prop; simpl; asimpl.
-  apply imp_elim with (P := var_tm 1 ∈ var_pred 0).
-  - replace (var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0) with
-      ((var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
-    apply forallP_elim.
-    apply (axiom 1); auto.
-  - apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
-    + replace (var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0) with
-      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
-      apply forallP_elim.
-      apply (axiom 2); auto.
-    + apply (axiom 0); auto.
-Qed.
-
 Lemma tm_pattern_at_impl : forall P Q u, tm_pattern_at u (P ⇒ Q) = (tm_pattern_at u P) ⇒ (tm_pattern_at u Q).
 Proof.
   intros; reflexivity.
@@ -540,159 +455,7 @@ Ltac pattac u := (rewrite (tm_pattern_at_subst u); repeat rewrite tm_pattern_at_
 
 Ltac pattmtac t u := rewrite (tm_pattern_at_tm_subst t u).
 
-Lemma sym_apply : forall Γ t1 t2,
-    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t2 ≃ t1.
-Proof.
-  intros.
-  apply imp_elim with (P := t1 ≃ t2); auto.
-  Check eq_symm.
-  replace (t1 ≃ t2 ⇒ t2 ≃ t1) with (t1⟨↑⟩ ≃ var_tm 0 ⇒ var_tm 0 ≃ t1⟨↑⟩)[t2..; ids] by (asimpl; auto).
-  apply forallt_elim.
-  replace (all t1 ⟨↑⟩ ≃ var_tm 0 ⇒ var_tm 0 ≃ t1 ⟨↑⟩) with ((all var_tm 1 ≃ var_tm 0 ⇒ var_tm 0 ≃ var_tm 1)[t1..;ids]) by (asimpl; auto).
-  apply forallt_elim.
-  apply eq_symm.
-Qed.
-
-Lemma subst_ren : forall t ξ, t⟨ξ⟩ = t[ξ >> var_tm].
-Proof.
-  induction t; simpl; asimpl; auto; intros; f_equal; try rewrite IHt1; try rewrite IHt2; auto.
-Qed.
-
-Lemma trans_apply : forall Γ t1 t2 t3,
-    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t2 ≃ t3 -> Γ ⊢ t1 ≃ t3.
-Proof.
-  intros.
-  apply imp_elim with (P := t2 ≃ t3); auto.
-  apply imp_elim with (P := t1 ≃ t2); auto.
-  Check eq_trans.
-  replace (t1 ≃ t2 ⇒ t2 ≃ t3 ⇒ t1 ≃ t3) with (var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩)[t1..;ids] by (asimpl; auto); apply forallt_elim.
-  replace (all var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩) with (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ t3⟨↑⟩⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩⟨↑⟩)[t2..;ids] by
-    (asimpl; repeat rewrite <- subst_ren; auto).
-  apply forallt_elim.
-  replace (all (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ t3 ⟨↑⟩ ⟨↑⟩ ⇒ var_tm 0 ≃ t3 ⟨↑⟩ ⟨↑⟩)) with
-    (all (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ var_tm 2 ⇒ var_tm 0 ≃ var_tm 2))[t3..;ids] by (asimpl; auto).
-  apply forallt_elim.
-  apply eq_trans.
-Qed.
-
-
-
-Lemma succ_eq :  forall Γ, Γ ⊢ all all var_tm 0 ≃ var_tm 1 ⇒ Succ (var_tm 0) ≃ Succ (var_tm 1).
-Proof.
-  intros.
-  repeat apply forallt_intro.
-  apply imp_intro.
-  Locate "≃".
-  pattac (var_tm 1).
-  eapply compr_elim.
-  rewrite tm_pattern_at_eq; simpl.
-  apply imp_elim with (P := var_tm 0 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})).
-  - replace (var_tm 0 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})
-                 ⇒ var_tm 1 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}}))
-      with
-      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0)[ids; ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})..]) by
-      (asimpl; auto).
-    apply forallP_elim.
-    apply (axiom 0); auto.
-
-  - apply compr_intro.
-    asimpl; simpl.
-    apply eq_refl.
-Qed.
-
-
-(* Probably simplify a lot by moving this up! *)
-Lemma eq_subst : forall Γ P t1 t2,
-    Γ ⊢ t1 ≃ t2 -> Γ ⊢ P[t1..;ids] -> Γ ⊢ P[t2..;ids].
-Proof.
-  intros.
-  apply compr_elim.
-  apply imp_elim with (P := t1 ∈ {{ _ | P }}).
-  - replace (t1 ∈ ({{ _ | P}}) ⇒ t2 ∈ ({{ _ | P}})) with
-      (t1 ∈ var_pred 0 ⇒ t2 ∈ var_pred 0)[ids; {{_ | P}}..] by (asimpl; auto).
-    apply forallP_elim; auto.
-  - apply compr_intro; auto.
-Qed.
-
-
-Lemma eq_subt_tm_aux : forall Γ t, Γ ⊢ all all var_tm 0 ≃ var_tm 1 ⇒ t[(var_tm 0)..] ≃ t[(var_tm 1)..].
-Proof.
-  intros.
-  repeat apply forallt_intro.
-  apply imp_intro.
-  replace (t[(var_tm 0)..] ≃ t[(var_tm 1)..]) with
-    (t[(var_tm 0)..]⟨↑⟩ ≃ t)[(var_tm 1)..; ids] by (asimpl; auto).
-  eapply eq_subst.
-  - apply (axiom 0); simpl; eauto.
-  - asimpl.
-    apply eq_refl.
-Qed.
-
-
-Lemma eq_subt_tm : forall Γ t t1 t2,
-    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t[t1..] ≃ t[t2..].
-Proof.
-  intros.
-  (* eapply imp_elim; [| apply H]. *)
-  replace (t[t1..] ≃ t[t2..]) with
-    (t[t1..]⟨↑⟩ ≃ t⟨↑⟩[(var_tm 0)..] )[t2..; ids] by (asimpl; auto).
-  eapply eq_subst; eauto.
-  asimpl.
-  apply eq_refl.
-Qed.
-
-
-Lemma eq_dec_eq : forall t, eq_dec_tm t t = left (Logic.eq_refl _).
-Proof.
-  intros t.
-  destruct (eq_dec_tm t t).
-  - f_equal.
-    pattern e at 1.
-    apply Eqdep_dec.K_dec_type; auto.
-    apply eq_dec_tm.
-  - destruct n; auto.
-Qed.
-
-
-Lemma eq_dec_neq : forall t1 t2, t1 <> t2 -> {H | eq_dec_tm t1 t2 = right H}.
-Proof.
-  intros t1 t2 neq.
-  destruct (eq_dec_tm t1 t2); try congruence.
-  exists n; auto.
-Qed.
-
-
-Lemma tm_pattern_at_tm_eq : forall t, tm_pattern_at_tm t t = var_tm 0.
-Proof.
-  intros t.
-  destruct t; unfold tm_pattern_at_tm; rewrite eq_dec_eq; auto.
-Qed.
-
-
-Lemma succ_apply : forall Γ t1 t2,
-    Γ ⊢ t1 ≃ t2 -> Γ ⊢ Succ t1 ≃ Succ t2.
-Proof.
-  intros.
-  pattmtac t1 (Succ t1); simpl.
-  edestruct (eq_dec_neq t1 (Succ t1)) as (?, e).
-  - clear H;
-    induction t1; try congruence.
-  - rewrite e.
-    rewrite tm_pattern_at_tm_eq.
-  pattmtac t2 (Succ t2); simpl.
-  edestruct (eq_dec_neq t2 (Succ t2)) as (?, e').
-  + clear H;
-    induction t2; try congruence.
-  + rewrite e'.
-    rewrite tm_pattern_at_tm_eq.
-    apply eq_subt_tm; auto.
-Qed.
-
-(* Exactly Coq.Sorting.Permutation, but in type *)
-(* Require Import List. *)
-(* Import ListNotations. *)
-
-(* Check []. *)
+(* Weakening *)
 
 Inductive Permutation {A : Type} : list A -> list A -> Type :=
 | perm_nil: Permutation nil nil
@@ -735,7 +498,7 @@ Qed.
 Theorem ctx_perm : forall Γ P, Γ ⊢ P -> forall Γ', Permutation Γ' Γ -> Γ' ⊢ P.
 Proof.
   intros Γ P prf; induction prf; intros; try (econstructor; now eauto).
-  - destruct (perm_nth_error _ _ _ H) as (f & h).
+  - destruct (perm_nth_error _ _ _ H0) as (f & h).
     apply (axiom (f n)).
     rewrite <- h; auto.
   - apply forallt_intro.
@@ -753,6 +516,57 @@ Proof.
     eapply ctx_perm; [apply IHprf | eauto].
 Qed.
 
+(* Weakening variables! *)
+Theorem lift_derives : forall Γ P, Γ ⊢ P -> forall ξ ζ, List.map (fun P => P⟨ξ; ζ⟩) Γ ⊢ P⟨ξ; ζ⟩.
+Proof.
+  intros Γ P prf; induction prf; intros; asimpl; try (constructor; now auto).
+  - apply (axiom n); auto.
+    unfold lift_tm; rewrite nth_error_map.
+    rewrite H; auto.
+  - constructor.
+    apply IHprf.
+  - constructor.
+    assert (h := IHprf (0, ξ >> S) ζ).
+    clear IHprf.
+    unfold lift_tm in *.
+    rewrite map_map in *; asimpl.
+    erewrite map_ext; [ | intros; rewrite renRen_prop; reflexivity].
+    erewrite map_ext in h; [apply h |].
+    asimpl.
+    unfold "↑".
+    intros.
+    rewrite renRen_prop; asimpl; auto.
+  - constructor.
+    assert (h := IHprf ξ (0, ζ >> S)); clear IHprf.
+    revert h.
+    unfold lift_prop.
+    repeat rewrite map_map; simpl.
+    asimpl.
+    erewrite map_ext;
+      [| intros; rewrite renRen_prop; reflexivity].
+    asimpl.
+    intros h; erewrite map_ext; [apply h |].
+    intros; rewrite renRen_prop; auto.
+  - eapply imp_elim; eauto.
+  - asimpl in *.
+    replace (subst_prop (ren_tm ξ t, ξ >> var_tm) (ζ >> var_pred) P)
+      with (P⟨0, ξ >> S; ζ⟩[t⟨ξ⟩..;ids]) by (asimpl; auto).
+    apply forallt_elim; auto.
+  - asimpl in *.
+    replace (subst_prop (ξ >> var_tm) (ren_pred ξ ζ Q, ζ >> var_pred) P)
+      with (P⟨ξ; 0, ζ >> S⟩[ids;Q⟨ξ;ζ⟩..]) by (asimpl; auto).
+    apply forallP_elim; auto.
+  - apply compr_intro; asimpl.
+    assert (subst_prop (ren_tm ξ t, ξ >> var_tm) (ζ >> var_pred) P = ren_prop ξ ζ (subst_prop (t, var_tm) var_pred P)) by (asimpl; auto).
+    rewrite H; auto.
+  - asimpl in *.
+    replace (subst_prop (ren_tm ξ t, ξ >> var_tm) (ζ >> var_pred) P) with
+      (P ⟨0, ξ >> S; ζ⟩[t⟨ξ⟩..;ids]) by (asimpl; auto).
+    apply compr_elim; auto.
+Qed.
+
+
+(* First order matching for application. Very useful! *)
 
 Inductive Match (A : Type) :=
 | Empty : Match A
@@ -772,7 +586,7 @@ Instance eqdec_tm : EqDec tm eq.
 Proof.
   unfold EqDec.
   apply eq_dec_tm.
-Qed.
+Defined.
 
 
 Definition join `{EqDec A eq} (l r : Match A) : Match A :=
@@ -991,20 +805,6 @@ Proof.
 Qed.
 
 
-(* Lemma match_var_subst_success : forall v t u level, match_var level v t = Success u -> (var_tm v)[ncons level u ids] = t. *)
-(* Proof. *)
-(*   intros v t u level; *)
-(*     unfold match_var. *)
-(*   destruct (Nat.ltb_spec v level). *)
-(*   - destruct t; try congruence; destruct (Nat.eqb_spec v n); congruence. *)
-(*   - destruct (Nat.eqb_spec v level). *)
-(*     + intros eq; inversion eq; subst; unfold ncons; asimpl. *)
-(*       destruct (Nat.ltb_spec level level); [ lia |]. *)
-(*       rewrite Nat.eqb_refl; auto. *)
-(*     + destruct t; try congruence. *)
-(*       destruct (v =? ↑ n0); congruence. *)
-(* Qed. *)
-
 Lemma join_empty_l : forall s1 s2, join s1 s2 = Empty -> s1 = Empty.
 Proof.
   destruct s1; destruct s2; unfold join; simpl; try congruence.
@@ -1051,18 +851,6 @@ Proof.
     + apply match_tm_subst_empty; auto.
     + apply match_tm_subst_empty; auto.
 Qed.
-
-(* Theorem match_tm_subst_success : forall p t u level, match_tm level p t = Success u -> p[ncons level u ids] = t. *)
-(* Proof. *)
-(*   induction p; induction t; simpl; try congruence; auto. *)
-(*   - asimpl; intros; f_equal; auto. *)
-(*   - intros; asimpl; f_equal; destruct (join_success _ _ _ H) as [(H1 , H2)| [(H1, H2) | (H1, H2)]]; try apply match_tm_subst_empty, IHp1, IHp2; auto. *)
-(*     + apply match_tm_subst_empty; auto. *)
-(*     + apply match_tm_subst_empty; auto. *)
-(*   - intros; asimpl; f_equal; destruct (join_success _ _ _ H) as [(H1 , H2)| [(H1, H2) | (H1, H2)]]; try apply match_tm_subst_empty, IHp1, IHp2; auto. *)
-(*     + apply match_tm_subst_empty; auto. *)
-(*     + apply match_tm_subst_empty; auto. *)
-(* Qed. *)
 
 
 Fixpoint match_prop level (p : prop) (t : prop) {struct p} : Match tm :=
@@ -1165,4 +953,279 @@ Proof.
   rewrite lift_tm_n_0.
   erewrite ext_prop; [| intros; rewrite ncons_0; eauto | reflexivity].
   apply forallt_elim; auto.
+Qed.
+
+Eval simpl in (forall Q P t, match_prop 0 (all P) Q = t).
+
+(* rather useless:
+   You already need to know t1 for this to be useful.
+*)
+Lemma apply_forallt2 : forall Γ P Q t1 t2,
+    match_prop 1 P P[var_tm 0, t1 ⟨↑⟩, ids >> ⟨↑⟩ ; ids] = Success t1
+    -> match_prop 0 P[var_tm 0, t1 ⟨↑⟩, ids >> ⟨↑⟩ ; ids] Q = Success t2
+    -> Γ ⊢ all (all P) -> Γ ⊢ Q.
+Proof.
+  intros.
+  eapply apply_forallt; eauto.
+  eapply apply_forallt; eauto.
+  simpl; apply H.
+Qed.
+
+Lemma apply_forall_def : forall P P' Q t1 t2,
+    match_prop 1 P P' = Success t1
+    -> match_prop 0 P' Q = Success t2
+    -> P' = P[var_tm 0, t1 ⟨↑⟩, ↑ >> ids ; ids].
+Proof.
+  intros.
+  assert (h1 := match_subst_success _ _ _ _ H).
+  assert (h2 := match_subst_success _ _ _ _ H0).
+  asimpl.
+  subst.
+  replace 1 with (↑ 0); auto.
+  replace (lift_tm_n (↑ 0) t1) with (t1⟨↑⟩) by reflexivity.
+  replace var_tm with (@ids fin tm _) by reflexivity.
+  eapply ext_prop; auto; intros.
+  rewrite <- ncons_scons; simpl.
+  destruct x; simpl; auto.
+  asimpl.
+  rewrite ncons_0.
+  destruct x; auto.
+Qed.
+
+
+(********************************************************************
+
+    Theorems in HA2 start here
+
+********************************************************************)
+
+
+
+(* This section is useful if we want to avoid an induction *axiom*,
+   and use a relative predicate everywhere instead. it has some
+   advantages in formalizing realizability. *)
+Section Nat_prfs.
+Definition Nat (t : tm) := FORALL Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ (Succ (var_tm 0)) ∈ var_pred 0) ⇒ t ∈ var_pred 0.
+
+Theorem Succ_Nat : forall Γ,
+    Γ ⊢ all Nat (var_tm 0) ⇒ Nat (Succ (var_tm 0)).
+Proof.
+  intros ?; apply forallt_intro.
+  apply imp_intro.
+  apply forallP_intro.
+  repeat apply imp_intro.
+  apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
+  - eapply apply_forallt; [| apply (axiom 0); reflexivity].
+    reflexivity.
+  - unfold Nat.
+    apply imp_elim with (P := (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0)); [ | apply (axiom 0); auto].
+    apply imp_elim with (P := Z ∈ var_pred 0); [ | apply (axiom 1); auto].
+    replace (Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0) with
+    ((Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ Succ (var_tm 0) ∈ var_pred 0) ⇒ var_tm 0 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
+    eapply forallP_elim.
+    unfold lift_prop; simpl; asimpl.
+    apply (axiom 2); auto.
+Qed.
+
+End Nat_prfs.
+
+Theorem eq_refl : forall Γ t, Γ ⊢ t ≃ t.
+Proof.
+  intros; apply forallP_intro; apply imp_intro.
+  apply (axiom 0); now auto.
+Qed.
+
+Lemma eq_symm_aux : forall (t1 t2 : nat),
+    (forall (P : nat -> Prop), P t1 -> P t2) -> (forall (P : nat -> Prop), P t2 -> P t1).
+Proof.
+  intros t1 t2 h P.
+  apply (h (fun n => P n -> P t1)).
+  intros h'; exact h'.
+Qed.
+
+
+Theorem eq_symm : forall Γ,
+    Γ ⊢ all all var_tm 1 ≃ var_tm 0 ⇒ var_tm 0 ≃ var_tm 1.
+Proof.
+  intros; repeat apply forallt_intro; apply imp_intro;
+    apply forallP_intro; simpl; asimpl.
+  pose (S := {{ _ | var_tm 0 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0}}).
+  apply imp_elim with (P := (var_tm 1 ∈ var_pred 0 ⇒ var_tm 0 ∈ var_pred 0)[ids; S..]).
+  - unfold S.
+    asimpl.
+    apply imp_intro.
+    rewrite (tm_pattern_at_subst (var_tm 0)); simpl.
+    apply compr_elim; asimpl; unfold shift.
+    eapply imp_elim; [apply (axiom 0); now eauto|].
+    apply compr_intro; asimpl.
+    apply imp_intro; apply (axiom 0); auto.
+  - eapply forallP_elim; apply (axiom 0); auto.
+Qed.
+
+Theorem eq_trans : forall Γ,
+    Γ ⊢ all all all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ var_tm 2 ⇒ var_tm 0 ≃ var_tm 2.
+Proof.
+  intro Γ.
+  repeat apply forallt_intro.
+  repeat apply imp_intro.
+  apply forallP_intro.
+  apply imp_intro.
+  unfold lift_prop; simpl; asimpl.
+  apply imp_elim with (P := var_tm 1 ∈ var_pred 0).
+  - replace (var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0) with
+      ((var_tm 1 ∈ var_pred 0 ⇒ var_tm 2 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
+    apply forallP_elim.
+    apply (axiom 1); auto.
+  - apply imp_elim with (P := var_tm 0 ∈ var_pred 0).
+    + replace (var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0) with
+      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0)[ids; (var_pred 0)..]) by auto.
+      apply forallP_elim.
+      apply (axiom 2); auto.
+    + apply (axiom 0); auto.
+Qed.
+
+Lemma sym_apply : forall Γ t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t2 ≃ t1.
+Proof.
+  intros.
+  apply imp_elim with (P := t1 ≃ t2); auto.
+  replace (t1 ≃ t2 ⇒ t2 ≃ t1) with (t1⟨↑⟩ ≃ var_tm 0 ⇒ var_tm 0 ≃ t1⟨↑⟩)[t2..; ids] by (asimpl; auto).
+  apply forallt_elim.
+  replace (all t1 ⟨↑⟩ ≃ var_tm 0 ⇒ var_tm 0 ≃ t1 ⟨↑⟩) with ((all var_tm 1 ≃ var_tm 0 ⇒ var_tm 0 ≃ var_tm 1)[t1..;ids]) by (asimpl; auto).
+  apply forallt_elim.
+  apply eq_symm.
+Qed.
+
+Lemma subst_ren : forall t ξ, t⟨ξ⟩ = t[ξ >> var_tm].
+Proof.
+  induction t; simpl; asimpl; auto; intros; f_equal; try rewrite IHt1; try rewrite IHt2; auto.
+Qed.
+
+Lemma trans_apply : forall Γ t1 t2 t3,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t2 ≃ t3 -> Γ ⊢ t1 ≃ t3.
+Proof.
+  intros.
+  apply imp_elim with (P := t2 ≃ t3); auto.
+  apply imp_elim with (P := t1 ≃ t2); auto.
+  Check eq_trans.
+  replace (t1 ≃ t2 ⇒ t2 ≃ t3 ⇒ t1 ≃ t3) with (var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩)[t1..;ids] by (asimpl; auto); apply forallt_elim.
+  replace (all var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩) with (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ t3⟨↑⟩⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩⟨↑⟩)[t2..;ids] by
+    (asimpl; repeat rewrite <- subst_ren; auto).
+  apply forallt_elim.
+  replace (all (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ t3 ⟨↑⟩ ⟨↑⟩ ⇒ var_tm 0 ≃ t3 ⟨↑⟩ ⟨↑⟩)) with
+    (all (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ var_tm 2 ⇒ var_tm 0 ≃ var_tm 2))[t3..;ids] by (asimpl; auto).
+  apply forallt_elim.
+  apply eq_trans.
+Qed.
+
+
+
+Lemma succ_eq :  forall Γ, Γ ⊢ all all var_tm 0 ≃ var_tm 1 ⇒ Succ (var_tm 0) ≃ Succ (var_tm 1).
+Proof.
+  intros.
+  repeat apply forallt_intro.
+  apply imp_intro.
+  pattac (var_tm 1).
+  eapply compr_elim.
+  rewrite tm_pattern_at_eq; simpl.
+  apply imp_elim with (P := var_tm 0 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})).
+  - replace (var_tm 0 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})
+                 ⇒ var_tm 1 ∈ ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}}))
+      with
+      ((var_tm 0 ∈ var_pred 0 ⇒ var_tm 1 ∈ var_pred 0)[ids; ({{ _ | Succ (var_tm (↑ 0)) ≃ Succ (var_tm 0)}})..]) by
+      (asimpl; auto).
+    apply forallP_elim.
+    apply (axiom 0); auto.
+
+  - apply compr_intro.
+    asimpl; simpl.
+    apply eq_refl.
+Qed.
+
+
+(* Probably simplify a lot by moving this up! *)
+Lemma eq_subst : forall Γ P t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ P[t1..;ids] -> Γ ⊢ P[t2..;ids].
+Proof.
+  intros.
+  apply compr_elim.
+  apply imp_elim with (P := t1 ∈ {{ _ | P }}).
+  - replace (t1 ∈ ({{ _ | P}}) ⇒ t2 ∈ ({{ _ | P}})) with
+      (t1 ∈ var_pred 0 ⇒ t2 ∈ var_pred 0)[ids; {{_ | P}}..] by (asimpl; auto).
+    apply forallP_elim; auto.
+  - apply compr_intro; auto.
+Qed.
+
+
+Lemma eq_subt_tm_aux : forall Γ t, Γ ⊢ all all var_tm 0 ≃ var_tm 1 ⇒ t[(var_tm 0)..] ≃ t[(var_tm 1)..].
+Proof.
+  intros.
+  repeat apply forallt_intro.
+  apply imp_intro.
+  replace (t[(var_tm 0)..] ≃ t[(var_tm 1)..]) with
+    (t[(var_tm 0)..]⟨↑⟩ ≃ t)[(var_tm 1)..; ids] by (asimpl; auto).
+  eapply eq_subst.
+  - apply (axiom 0); simpl; eauto.
+  - asimpl.
+    apply eq_refl.
+Qed.
+
+
+Lemma eq_subt_tm : forall Γ t t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ t[t1..] ≃ t[t2..].
+Proof.
+  intros.
+  (* eapply imp_elim; [| apply H]. *)
+  replace (t[t1..] ≃ t[t2..]) with
+    (t[t1..]⟨↑⟩ ≃ t⟨↑⟩[(var_tm 0)..] )[t2..; ids] by (asimpl; auto).
+  eapply eq_subst; eauto.
+  asimpl.
+  apply eq_refl.
+Qed.
+
+
+Lemma eq_dec_eq : forall t, eq_dec_tm t t = left (Logic.eq_refl _).
+Proof.
+  intros t.
+  destruct (eq_dec_tm t t).
+  - f_equal.
+    pattern e at 1.
+    apply Eqdep_dec.K_dec_type; auto.
+    apply eq_dec_tm.
+  - destruct n; auto.
+Qed.
+
+
+Lemma eq_dec_neq : forall t1 t2, t1 <> t2 -> {H | eq_dec_tm t1 t2 = right H}.
+Proof.
+  intros t1 t2 neq.
+  destruct (eq_dec_tm t1 t2); try congruence.
+  exists n; auto.
+Qed.
+
+
+Lemma tm_pattern_at_tm_eq : forall t, tm_pattern_at_tm t t = var_tm 0.
+Proof.
+  intros t.
+  destruct t; unfold tm_pattern_at_tm; rewrite eq_dec_eq; auto.
+Qed.
+
+
+Lemma succ_apply : forall Γ t1 t2,
+    Γ ⊢ t1 ≃ t2 -> Γ ⊢ Succ t1 ≃ Succ t2.
+Proof.
+  intros.
+  pattmtac t1 (Succ t1); simpl.
+  edestruct (eq_dec_neq t1 (Succ t1)) as (?, e).
+  - clear H;
+    induction t1; try congruence.
+  - rewrite e.
+    rewrite tm_pattern_at_tm_eq.
+  pattmtac t2 (Succ t2); simpl.
+  edestruct (eq_dec_neq t2 (Succ t2)) as (?, e').
+  + clear H;
+    induction t2; try congruence.
+  + rewrite e'.
+    rewrite tm_pattern_at_tm_eq.
+    apply eq_subt_tm; auto.
 Qed.
