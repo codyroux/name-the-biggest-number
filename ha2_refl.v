@@ -609,29 +609,55 @@ Proof.
     auto.
 Qed.
 
-Lemma closed_eval_tm : forall t vval vval',
- closed_tm 0 t -> eval_tm vval t = eval_tm vval' t.
+Lemma closed_eval_tm : forall t vval vval' level,
+    (forall n, n < level -> vval n = vval' n) ->
+    closed_tm level t -> eval_tm vval t = eval_tm vval' t.
 Proof.
   induction t; simpl; intros; unfold is_true in *; auto.
-  - rewrite Nat.ltb_lt in *; lia.
+  - rewrite Nat.ltb_lt in *; auto.
+  - f_equal; firstorder.
   - rewrite Bool.andb_true_iff in *; intuition.
-  - rewrite Bool.andb_true_iff in *; intuition.
+    f_equal; eauto.
+  - rewrite Bool.andb_true_iff in *; intuition
+    f_equal; eauto.
 Qed.
 
+
+Lemma closed_eval' : forall P vval vval' pval pval' level_tm level_pred,
+    (forall n, n < level_tm -> vval n = vval' n) ->
+    (forall n, n < level_pred -> pval n = pval' n) ->
+    closed_prop level_tm level_pred P -> eval_prop pval vval P <-> eval_prop pval' vval' P.
+Proof.
+  induction P using prop_pred_ind
+    with (P0 := fun p => forall vval vval' pval pval' level_tm level_pred,
+                        (forall n, n < level_tm -> vval n = vval' n) ->
+                        (forall n, n < level_pred -> pval n = pval' n) ->
+                        closed_pred level_tm level_pred p -> forall n, eval_pred pval vval p n <-> eval_pred pval' vval' p n); simpl; unfold is_true; intros; auto.
+  - rewrite Bool.andb_true_iff in H1; destruct H1; erewrite closed_eval_tm; try apply IHP; eauto.
+  - apply forall_iff; intros n.
+    assert (h := IHP (n, vval) (n, vval') pval pval' (S level_tm) level_pred).
+    apply h; auto.
+    intros m; destruct m; auto.
+    simpl; intro lt; apply H; lia.
+  - apply forall_iff; intros Pr.
+    assert (h := IHP vval vval' (Pr, pval) (Pr, pval') level_tm (S level_pred)).
+    apply h; auto.
+    intros m; destruct m; auto.
+    simpl; intro lt; apply H0; lia.
+  - rewrite Bool.andb_true_iff in H1; destruct H1.
+    rewrite IHP1, IHP2; [reflexivity | | | | | |]; eauto.
+  - rewrite Nat.ltb_lt in *; rewrite H0; try reflexivity; auto.
+  - assert (h := IHP (n, vval) (n, vval') pval pval' (S level_tm) level_pred).
+    apply h; auto.
+    intros m; destruct m; auto.
+    simpl; intro lt; apply H; lia.
+Qed.
 
 Lemma closed_eval : forall P vval pval vval' pval',
  closed_prop 0 0 P -> eval_prop pval vval P <-> eval_prop pval' vval' P.
 Proof.
-  induction P using prop_pred_ind
-    with (P0 := fun p => forall vval pval vval' pval', closed_pred 0 0 p -> forall n, eval_pred pval vval p n <-> eval_pred pval' vval' p n); simpl; unfold is_true; intros; auto.
-  - rewrite Bool.andb_true_iff in *; erewrite closed_eval_tm; try apply IHP; intuition.
-  - admit.
-  - admit.
-  - rewrite Bool.andb_true_iff in *.
-    rewrite IHP1, IHP2; [reflexivity | |]; intuition.
-  - rewrite Nat.ltb_lt in *; lia.
-  - admit.
-Admitted.
+  intros; eapply closed_eval'; eauto; intros n; lia.
+Qed.
 
 (* is this even true? Certainly if P and Q are closed... *)
 Instance or_complete {P Q}{cpltP : complete nil P}{cpltQ : complete nil Q} : closed_prop 0 0 P -> closed_prop 0 0 Q -> complete nil (P ∨ Q).
@@ -651,4 +677,51 @@ Proof.
     erewrite closed_eval; eauto.
 Qed.
 
-(* TODO: complete nil P[#n..; ids] -> complete nil ∃ P *)
+Theorem ex_intro : forall Γ P t, Γ ⊢ P[t..;ids] -> Γ ⊢ ∃ P.
+Proof.
+  intros.
+  apply forallP_intro.
+  repeat apply imp_intro.
+  apply imp_elim with (P := P⟨id; ↑⟩[t..; ids]).
+  - replace (P⟨id; ↑⟩[t..; ids] ⇒ (all var_tm 0 ∈ var_pred 0)) with
+      (P⟨id; ↑⟩ ⇒ (all var_tm 0 ∈ var_pred 0))[t..; ids] by (asimpl; auto).
+    apply forallt_elim.
+    apply (axiom 0); auto.
+  - apply weakening.
+    replace (P ⟨id;↑⟩[t..; ids]) with (P[t..; ids]⟨id;↑⟩) by (asimpl; auto).
+    apply lift_derives; auto.
+Qed.
+
+Lemma eval_nth : forall n vval, eval_tm vval (n_tm n) = n.
+Proof.
+  induction n; simpl; auto.
+Qed.
+
+Hint Rewrite eval_nth.
+
+Instance ex_complete {P} {cpltInst : forall n, complete nil P[(n_tm n)..;ids]} : closed_prop 1 0 P -> complete nil (∃ P).
+Proof.
+  intros closed_P.
+  constructor.
+  unfold models; simpl.
+  intros h.
+  assert (h := h bot_pval bot_vval val_nil (fun _ => exists n, eval_prop bot_pval (n, bot_vval) P)); simpl in *.
+  edestruct h; [ | exact 0 | ].
+  - intros n h1 _.
+    exists n.
+    rewrite eval_ren in h1; asimpl in *.
+    apply h1.
+  - pose (x_syn := n_tm x).
+    apply ex_intro with (t := x_syn).
+    apply cpltInst.
+    intro; intros.
+    Check eval_subst.
+    apply eval_subst.
+    simpl.
+    asimpl.
+    eapply closed_eval' with (level_tm := 1)(vval := (x, bot_vval))(pval := bot_pval); [| | eauto | auto].
+    + destruct n; simpl; [ | lia].
+      intros _.
+      rewrite eval_nth; auto.
+    + intro; lia.
+Qed.
