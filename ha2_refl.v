@@ -1,6 +1,6 @@
 (* Let's build tools to reflect Coq proofs into HA2 *)
 
-Require Import ha2.
+Require Export ha2.
 
 Require Import Arith.
 
@@ -138,9 +138,13 @@ Proof.
       replace
         (Mult (n_tm k) (Succ (n_tm l)) ≃ Add (n_tm k) (Mult (n_tm k) (n_tm l)))
         with
-        (Mult (n_tm k) (Succ (var_tm 0)) ≃ Add (n_tm k) (Mult (n_tm k) (var_tm 0)))[(n_tm l)..; ids] by (asimpl; repeat rewrite subst_closed; auto).
+        (Mult (n_tm k) (Succ (var_tm 0)) ≃ Add (n_tm k) (Mult (n_tm k) (var_tm 0)))[(n_tm l)..; ids]
+        by (asimpl; repeat rewrite subst_closed; auto).
       apply forallt_elim.
-      replace (all Mult (n_tm k) (Succ (var_tm 0)) ≃ Add (n_tm k) (Mult (n_tm k) (var_tm 0))) with (all Mult (var_tm 1) (Succ (var_tm 0)) ≃ Add (var_tm 1) (Mult (var_tm 1) (var_tm 0)))[(n_tm k)..; ids] by (asimpl; repeat rewrite subst_closed, ren_closed; repeat rewrite ren_closed; auto).
+      replace (all Mult (n_tm k) (Succ (var_tm 0)) ≃ Add (n_tm k) (Mult (n_tm k) (var_tm 0)))
+        with
+        (all Mult (var_tm 1) (Succ (var_tm 0)) ≃ Add (var_tm 1) (Mult (var_tm 1) (var_tm 0)))[(n_tm k)..; ids]
+        by (asimpl; repeat rewrite subst_closed, ren_closed; repeat rewrite ren_closed; auto).
       apply forallt_elim.
       apply times_S.
     + rewrite Nat.mul_comm.
@@ -177,18 +181,22 @@ Proof.
     apply succ_apply; auto.
   - apply trans_apply with (t2 := Add (n_tm (eval_tm vval t1)) (n_tm (eval_tm vval t2))); [ | apply eq_add].
     replace (Add t1 t2 ≃ Add (n_tm (eval_tm vval t1)) (n_tm (eval_tm vval t2))) with
-      (Add t1 t2 ≃ Add (var_tm 0) (n_tm (eval_tm vval t2)))[(n_tm (eval_tm vval t1))..; ids] by (asimpl; repeat rewrite subst_closed; eauto).
+      (Add t1 t2 ≃ Add (var_tm 0) (n_tm (eval_tm vval t2)))[(n_tm (eval_tm vval t1))..; ids]
+      by (asimpl; repeat rewrite subst_closed; eauto).
     eapply eq_subst; eauto; asimpl; repeat rewrite subst_closed; eauto.
     replace (Add t1 t2 ≃ Add t1 (n_tm (eval_tm vval t2))) with
-      (Add t1 t2 ≃ Add t1 (var_tm 0))[(n_tm (eval_tm vval t2))..; ids] by (asimpl; repeat rewrite subst_closed; eauto).
+      (Add t1 t2 ≃ Add t1 (var_tm 0))[(n_tm (eval_tm vval t2))..; ids]
+      by (asimpl; repeat rewrite subst_closed; eauto).
     eapply eq_subst; eauto; asimpl; repeat rewrite subst_closed; eauto.
     apply eq_refl.
   - apply trans_apply with (t2 := Mult (n_tm (eval_tm vval t1)) (n_tm (eval_tm vval t2))); [ | apply eq_mult].
     replace (Mult t1 t2 ≃ Mult (n_tm (eval_tm vval t1)) (n_tm (eval_tm vval t2))) with
-      (Mult t1 t2 ≃ Mult (var_tm 0) (n_tm (eval_tm vval t2)))[(n_tm (eval_tm vval t1))..; ids] by (asimpl; repeat rewrite subst_closed; eauto).
+      (Mult t1 t2 ≃ Mult (var_tm 0) (n_tm (eval_tm vval t2)))[(n_tm (eval_tm vval t1))..; ids]
+      by (asimpl; repeat rewrite subst_closed; eauto).
     eapply eq_subst; eauto; asimpl; repeat rewrite subst_closed; eauto.
     replace (Mult t1 t2 ≃ Mult t1 (n_tm (eval_tm vval t2))) with
-      (Mult t1 t2 ≃ Mult t1 (var_tm 0))[(n_tm (eval_tm vval t2))..; ids] by (asimpl; repeat rewrite subst_closed; eauto).
+      (Mult t1 t2 ≃ Mult t1 (var_tm 0))[(n_tm (eval_tm vval t2))..; ids]
+      by (asimpl; repeat rewrite subst_closed; eauto).
     eapply eq_subst; eauto; asimpl; repeat rewrite subst_closed; eauto.
     apply eq_refl.
 Qed.
@@ -724,4 +732,111 @@ Proof.
       intros _.
       rewrite eval_nth; auto.
     + intro; lia.
+Qed.
+
+Definition ha_leq t1 t2 := ∃ (Add t1⟨↑⟩ (var_tm 0) ≃ t2⟨↑⟩).
+
+Notation "t1 ≤ t2" := (ha_leq t1 t2)(at level 10).
+
+Lemma lift_closed : forall t level, closed_tm level t -> closed_tm (S level) t⟨↑⟩.
+Proof.
+  induction t; simpl; auto; intros ?; unfold is_true; repeat rewrite Bool.andb_true_iff; intros (h1 & h2); split; try apply IHt1; try apply IHt2; auto.
+Qed.
+
+Instance leq_complete t u : closed_tm 0 t -> closed_tm 0 u -> complete nil (t ≤ u).
+Proof.
+  intros; unfold ha_leq.
+  eapply ex_complete.
+  simpl; unfold is_true in *; repeat rewrite Bool.andb_true_iff.
+  repeat split; apply lift_closed; auto.
+  Unshelve.
+  intros; asimpl.
+  apply complete_eq; auto.
+  simpl; unfold is_true; rewrite Bool.andb_true_iff; split; auto.
+  apply closed_n_tm; auto.
+Qed.
+
+
+(* Let's prove that the connectors are correctly reflected in the model *)
+Theorem models_eq : forall t u vval pval, eval_prop pval vval (t ≃ u) <-> eval_tm vval t = eval_tm vval u.
+Proof.
+  simpl.
+  intros; split; [| intro e; rewrite e; now auto] .
+  intro h; assert (h := h (fun x => (eval_tm vval t) = x)).
+  simpl in h; auto.
+Qed.
+
+Theorem models_exists : forall P vval pval, eval_prop pval vval (∃ P) <-> exists n, eval_prop pval (n, vval) P.
+Proof.
+  simpl; intros; split.
+  - intros h; assert (h := h (fun _ => exists n, eval_prop pval (n, vval) P)).
+    apply h; [| exact 0].
+    intros n.
+    rewrite eval_ren.
+    asimpl.
+    intros; eauto.
+  - intros h; destruct h as (n, h).
+    intros Pr h1 m; eapply h1.
+    rewrite eval_ren; asimpl; eauto.
+Qed.
+
+Theorem models_leq : forall t u vval pval, eval_prop pval vval (t ≤ u) <-> eval_tm vval t <= eval_tm vval u.
+Proof.
+  intros; unfold "≤".
+  rewrite models_exists.
+  split; [intros h; destruct h; rewrite models_eq in * |].
+  - simpl in H.
+    repeat rewrite eval_tm_ren in H; asimpl in H.
+    lia.
+  - intros; exists (eval_tm vval u - eval_tm vval t).
+    asimpl.
+    rewrite models_eq; simpl.
+    repeat rewrite eval_tm_ren.
+    asimpl.
+    lia.
+Qed.
+
+Theorem models_imp : forall P Q vval pval, eval_prop pval vval (P ⇒ Q) <-> (eval_prop pval vval P -> eval_prop pval vval Q).
+Proof.
+  simpl; intuition.
+Qed.
+
+Theorem models_and : forall P Q vval pval, eval_prop pval vval (P ∧ Q) <-> eval_prop pval vval P /\ eval_prop pval vval Q.
+Proof.
+  intros; unfold "∧"; simpl.
+  split.
+  - intros h; split; apply h; try exact 0; asimpl; repeat rewrite eval_ren; asimpl; auto.
+  - intros (h1 & h2); intros Pr; repeat rewrite eval_ren; asimpl; auto.
+Qed.
+
+Theorem models_or : forall P Q vval pval, eval_prop pval vval (P ∨ Q) <-> eval_prop pval vval P \/ eval_prop pval vval Q.
+Proof.
+  intros; unfold "∨"; simpl.
+  split; intros h.
+  - apply h; [left | right | exact 0].
+    + rewrite eval_ren in H.
+      asimpl in H.
+      auto.
+    + rewrite eval_ren in H.
+      asimpl in H.
+      auto.
+  - destruct h; intros Pr; repeat rewrite eval_ren; asimpl; intros H1 H2.
+    + apply H1; auto.
+    + apply H2; auto.
+Qed.
+
+Theorem models_bot : forall vval pval, eval_prop pval vval ⊥ <-> False.
+Proof.
+  intros; simpl.
+  intuition.
+  apply H; exact 0.
+Qed.
+
+Theorem models_neg : forall P vval pval, eval_prop pval vval (P ⇒ ⊥) <-> ~ (eval_prop pval vval P).
+Proof.
+  intros.
+  assert (h := models_imp P ⊥ vval pval).
+  rewrite models_bot in h.
+  unfold "~".
+  exact h.
 Qed.
