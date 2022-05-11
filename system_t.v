@@ -103,6 +103,38 @@ Print value.
 
 Definition Comp_Nat : value -> Prop := fun v => exists n, v = VConst n.
 
+(* We probably need this if we don't want to define the predicates by
+  recursion over type...  *)
+(* Definition Computable_val_F *)
+(*            (Cv : type -> value -> Prop) *)
+(*            (Ct : type -> eval_ctx -> term -> Prop) := *)
+(*   fun ty v => *)
+(*     match ty with *)
+(*     | Nat => Comp_Nat v *)
+(*     | Arrow t1 t2 => *)
+(*         match v with *)
+(*         |VAbs t ectx => *)
+(*            forall v', Cv t1 v' -> *)
+(*                       Ct t2 (v' ::: ectx) t *)
+(*         | _ => False *)
+(*         end *)
+(*     end. *)
+
+(* Definition Computable_tm_F *)
+(*            (Cv : type -> value -> Prop) *)
+(*            (Ct : type -> eval_ctx -> term -> Prop) := *)
+(*         fun ty ectx t => *)
+(*           match ty with *)
+(*           | Nat => exists v, TmEval ectx t v /\ Comp_Nat v *)
+(*           | Arrow t1 t2 => *)
+(*               exists t' ectx', TmEval ectx t (VAbs t' ectx') /\ *)
+(*                                  forall v, *)
+(*                                    Cv t1 v -> *)
+(*                                    Ct t2 (v ::: ectx') t' *)
+(*           end *)
+(* . *)
+
+
 Fixpoint Computable_val (ty : type) : value -> Prop :=
   fun v =>
     match ty with
@@ -324,5 +356,9 @@ From Coq Require Import Logic.ConstructiveEpsilon.
 Check constructive_indefinite_ground_description.
 
 Print TmEval.
+Print eval_ctx.
+Print term.
+Print type.
+
 
 
