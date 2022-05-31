@@ -57,6 +57,7 @@ Notation "t1 ≃ t2" := (FORALL t1 ∈ var_pred 0 ⇒ t2 ∈ var_pred 0) (at lev
 Notation "∃ Q" := (FORALL (all Q⟨id; ↑⟩ ⇒ all var_tm 0 ∈ var_pred 0) ⇒ all var_tm 0 ∈ var_pred 0)(at level 10).
 
 Notation "⊥" := (FORALL all var_tm 0 ∈ var_pred 0).
+Notation "t ≄ u" := ((t ≃ u) ⇒ ⊥)(at level 20).
 
 Definition lift_prop (Γ : ctxt) : ctxt :=
   List.map (fun P => P⟨id;↑⟩) Γ.
@@ -65,7 +66,7 @@ Definition lift_tm (Γ : ctxt) : ctxt :=
   List.map (fun P => P⟨↑; id⟩) Γ.
 
 
-Inductive derives : ctxt -> prop -> Prop :=
+Inductive derives : ctxt -> prop -> Type :=
 | axiom : forall n Γ P, List.nth_error Γ n = Some P -> derives Γ P
 | imp_intro : forall Γ P Q,
     derives (P::Γ) Q -> derives Γ (P ⇒ Q)
@@ -82,7 +83,7 @@ Inductive derives : ctxt -> prop -> Prop :=
 | compr_elim : forall Γ P (t : tm),
     derives Γ (t ∈ {{ _ | P }}) ->
     derives Γ P[t..;ids]
-| zero_S : forall Γ, derives Γ (all Succ (var_tm 0) ≃ Z ⇒ ⊥)
+| zero_S : forall Γ, derives Γ (all Succ (var_tm 0) ≄ Z)
 | inj_S : forall Γ,
     derives Γ (all all (Succ (var_tm 1)) ≃ (Succ (var_tm 0)) ⇒ (var_tm 1 ≃ var_tm 0))
 | plus_Z : forall Γ, derives Γ (all Add (var_tm 0) Z ≃ var_tm 0)
@@ -129,9 +130,6 @@ Qed.
 
 Scheme prop_pred_ind := Induction for prop Sort Prop
     with pred_prop_ind := Induction for pred Sort Prop.
-
-Check prop_pred_ind.
-
 
 Lemma eval_ext : forall P pval vval vval',
     (forall x, vval x = vval' x) ->
@@ -314,16 +312,14 @@ Proof.
     auto.
 Qed.
 
-Search (List.nth_error).
-
 Theorem soundness : forall Γ P, Γ ⊢ P -> Γ ⊧ P.
 Proof.
   intros G P d; induction d.
   - unfold "⊧".
     unfold validates; intros.
     rewrite Forall_forall in *.
-    apply nth_error_In in H.
-    apply H0; now auto.
+    apply nth_error_In in e.
+    apply H; now auto.
   - intro; simpl.
     intros.
     apply IHd.
@@ -428,7 +424,7 @@ Fixpoint tm_pattern_at (u : tm) (P : prop) : prop :=
   | n ∈ P => tm_pattern_at_tm u n ∈ P⟨↑; id⟩
   | FORALL P => FORALL (tm_pattern_at u P)
   | P ⇒ Q => (tm_pattern_at u P) ⇒ (tm_pattern_at u Q)
-  (* Fixme: handle these cases? *)
+  (* FIXME: handle these cases? *)
   | _ => P⟨↑; id⟩
   end.
 
@@ -498,7 +494,7 @@ Qed.
 Theorem ctx_perm : forall Γ P, Γ ⊢ P -> forall Γ', Permutation Γ' Γ -> Γ' ⊢ P.
 Proof.
   intros Γ P prf; induction prf; intros; try (econstructor; now eauto).
-  - destruct (perm_nth_error _ _ _ H0) as (f & h).
+  - destruct (perm_nth_error _ _ _ H) as (f & h).
     apply (axiom (f n)).
     rewrite <- h; auto.
   - apply forallt_intro.
@@ -522,7 +518,7 @@ Proof.
   intros Γ P prf; induction prf; intros; asimpl; try (constructor; now auto).
   - apply (axiom n); auto.
     unfold lift_tm; rewrite nth_error_map.
-    rewrite H; auto.
+    rewrite e; auto.
   - constructor.
     apply IHprf.
   - constructor.
@@ -650,8 +646,6 @@ Fixpoint lower_tm (level : fin) (t : tm) : option tm :=
   | Add t1 t2 => option_map2 Add (lower_tm level t1) (lower_tm level t2)
   | Mult t1 t2 => option_map2 Mult (lower_tm level t1) (lower_tm level t2)
   end.
-
-Check Nat.iter.
 
 Definition lift_tm_n (level : fin) (t : tm) : tm :=
   t⟨Nat.iter level ↑⟩.
@@ -1007,6 +1001,12 @@ Qed.
 Section Nat_prfs.
 Definition Nat (t : tm) := FORALL Z ∈ var_pred 0 ⇒ (all var_tm 0 ∈ var_pred 0 ⇒ (Succ (var_tm 0)) ∈ var_pred 0) ⇒ t ∈ var_pred 0.
 
+Theorem Z_Nat : forall Γ, Γ ⊢ Nat Z.
+Proof.
+  intros; apply forallP_intro; repeat apply imp_intro.
+  apply (axiom 1); auto.
+Qed.
+
 Theorem Succ_Nat : forall Γ,
     Γ ⊢ all Nat (var_tm 0) ⇒ Nat (Succ (var_tm 0)).
 Proof.
@@ -1107,7 +1107,6 @@ Proof.
   intros.
   apply imp_elim with (P := t2 ≃ t3); auto.
   apply imp_elim with (P := t1 ≃ t2); auto.
-  Check eq_trans.
   replace (t1 ≃ t2 ⇒ t2 ≃ t3 ⇒ t1 ≃ t3) with (var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩)[t1..;ids] by (asimpl; auto); apply forallt_elim.
   replace (all var_tm 0 ≃ t2⟨↑⟩ ⇒ t2⟨↑⟩ ≃ t3⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩) with (all var_tm 0 ≃ var_tm 1 ⇒ var_tm 1 ≃ t3⟨↑⟩⟨↑⟩ ⇒ var_tm 0 ≃ t3⟨↑⟩⟨↑⟩)[t2..;ids] by
     (asimpl; repeat rewrite <- subst_ren; auto).

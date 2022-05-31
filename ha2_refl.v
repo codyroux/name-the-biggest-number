@@ -28,7 +28,6 @@ with
       | {{ _ | P }} => closed_prop (shift t_level) p_level P
       end.
 
-Notation "t ≄ u" := ((t ≃ u) ⇒ ⊥)(at level 20).
 Locate "∃".
 
 Import ListNotations.
@@ -382,7 +381,7 @@ Definition or_prop P Q := FORALL (P⟨id; ↑⟩ ⇒ all (var_tm 0) ∈ (var_pre
 Notation "P ∨ Q" := (or_prop P Q) (at level 25).
 
 
-Class complete Γ P := { reflect : Γ ⊧ P -> Γ ⊢ P }.
+Class complete P := { reflect : nil ⊧ P -> nil ⊢ P }.
 
 Lemma superweak : forall Γ P, nil ⊢ P -> Γ ⊢ P.
 Proof.
@@ -391,21 +390,21 @@ Proof.
   apply weakening; auto.
 Qed.
 
-Lemma reflect_closed {P : prop} [cp : complete nil P] : forall Γ, [] ⊧ P -> Γ ⊢ P.
+Lemma reflect_closed {P : prop} [cp : complete P] : forall Γ, [] ⊧ P -> Γ ⊢ P.
   intros; apply superweak.
   apply reflect; auto.
 Qed.
 
-Instance complete_eq (t u : tm) : closed_tm 0 t -> closed_tm 0 u -> complete nil (t ≃ u).
+Instance complete_eq (t u : tm) : closed_tm 0 t -> closed_tm 0 u -> complete (t ≃ u).
 intros; constructor; intros; apply eq_complete; auto.
 Qed.
 
-Instance complete_neq (t u : tm) : closed_tm 0 t -> closed_tm 0 u -> complete nil (t ≄ u).
+Instance complete_neq (t u : tm) : closed_tm 0 t -> closed_tm 0 u -> complete (t ≄ u).
 intros; constructor; intros; apply neq_complete; auto.
 Qed.
 
 (* Useless on its own, but may find use later. *)
-Instance complete_false : complete nil ⊥.
+Instance complete_false : complete ⊥.
 constructor; unfold "⊧"; simpl; intros.
 exfalso.
 apply (H (fun _ _ => False) (fun _ => 0)); unfold validates; auto.
@@ -413,17 +412,9 @@ exact 0.
 Qed.
 
 (* This does *not* hold with the current definition of completeness *)
-Instance complete_imp {Γ P Q} {cq : complete (P::Γ) Q} : complete Γ (P ⇒ Q).
-constructor; intros.
-apply imp_intro.
-apply reflect.
-unfold "⊧" in *; simpl in *; intros.
-apply H.
-- inversion H0; subst; auto.
-- inversion H0; auto.
-Qed.
+Instance complete_imp {P Q} {cq : complete Q} : complete (P ⇒ Q).
+Abort.
 
-Print "⊧".
 
 Definition bot_pval : PVal := fun _ _ => False.
 Definition bot_vval : VVal := fun _ => 0.
@@ -593,7 +584,7 @@ Proof.
 Qed.
 
 (* TODO: completeness for ∨ and ∧ *)
-Instance and_complete {P Q}{cpltP : complete nil P}{cpltQ : complete nil Q} : complete nil (P ∧ Q).
+Instance and_complete {P Q}{cpltP : complete P}{cpltQ : complete Q} : complete (P ∧ Q).
 Proof.
   constructor.
   destruct cpltP, cpltQ.
@@ -667,22 +658,29 @@ Proof.
   intros; eapply closed_eval'; eauto; intros n; lia.
 Qed.
 
+Notation "Γ ⊧̸ P" := (~ (Γ ⊧ P))(at level 40).
+
+Definition ha_dec P := { nil ⊧ P } + { nil ⊧̸ P }.
+
 (* is this even true? Certainly if P and Q are closed... *)
-Instance or_complete {P Q}{cpltP : complete nil P}{cpltQ : complete nil Q} : closed_prop 0 0 P -> closed_prop 0 0 Q -> complete nil (P ∨ Q).
+Instance or_complete {P Q}{cpltP : complete P}{cpltQ : complete Q} : closed_prop 0 0 P -> closed_prop 0 0 Q -> ha_dec P -> ha_dec Q -> complete (P ∨ Q).
 Proof.
-  intros clp clq; constructor; destruct cpltP, cpltQ; unfold models; simpl; intros h.
-  (* Unclear that this holds! what if P is is_even n and Q is is_odd n? *)
-  assert (h := h bot_pval bot_vval val_nil (fun _ => eval_prop bot_pval bot_vval P \/ eval_prop bot_pval bot_vval Q)).
-  edestruct h.
-  - rewrite eval_ren; asimpl; intros; left; auto.
-  - rewrite eval_ren; asimpl; intros; right; auto.
-  - exact 0.
-  - eapply imp_elim; [ apply or_intro1 |].
-    apply reflect0; intro; intros.
-    erewrite closed_eval; eauto.
-  - eapply imp_elim; [apply or_intro2 |].
-    apply reflect1; intro; intros.
-    erewrite closed_eval; eauto.
+  intros clp clq decp decq; constructor; intros h.
+  destruct decp.
+  - eapply imp_elim; [apply or_intro1 |].
+    apply cpltP; auto.
+  - destruct decq.
+    + eapply imp_elim; [apply or_intro2|].
+      apply cpltQ; auto.
+    + exfalso.
+      unfold models in *; simpl in *.
+      assert (h := h bot_pval bot_vval val_nil (fun _ => False)).
+      apply h; simpl; [ | | exact 0].
+      -- intros; apply n.
+         rewrite eval_ren in H.
+         intros; erewrite closed_eval; eauto.
+      -- intros; apply n0; rewrite eval_ren in H.
+         intros; erewrite closed_eval; eauto.
 Qed.
 
 Theorem ex_intro : forall Γ P t, Γ ⊢ P[t..;ids] -> Γ ⊢ ∃ P.
@@ -707,26 +705,47 @@ Qed.
 
 Hint Rewrite eval_nth.
 
-Instance ex_complete {P} {cpltInst : forall n, complete nil P[(n_tm n)..;ids]} : closed_prop 1 0 P -> complete nil (∃ P).
+Require Import ConstructiveEpsilon.
+Definition cigdn := constructive_indefinite_ground_description_nat.
+
+Instance ex_complete {P} {cpltInst : forall n, complete P[(n_tm n)..;ids]} : (forall n, ha_dec P[(n_tm n)..;ids]) -> closed_prop 1 0 P -> complete (∃ P).
 Proof.
-  intros closed_P.
+  intros dec_P closed_P.
   constructor.
   unfold models; simpl.
   intros h.
   assert (h := h bot_pval bot_vval val_nil (fun _ => exists n, eval_prop bot_pval (n, bot_vval) P)); simpl in *.
-  edestruct h; [ | exact 0 | ].
-  - intros n h1 _.
-    exists n.
-    rewrite eval_ren in h1; asimpl in *.
-    apply h1.
-  - pose (x_syn := n_tm x).
+  assert { n0 : nat | eval_prop bot_pval (n0, bot_vval) P}.
+  - apply cigdn.
+    + intros.
+      destruct (dec_P n).
+      -- left.
+         unfold models in m.
+         assert (m := m bot_pval bot_vval val_nil).
+         rewrite eval_subst in m.
+         eapply closed_eval' with (level_tm := 1)(vval := (n, bot_vval))(pval := bot_pval); [| | eauto | eauto]; simpl; auto.
+         destruct n0; simpl; auto.
+         intros _.
+         rewrite eval_nth; auto.
+      -- right.
+         intro.
+         apply n0.
+         unfold models; intros.
+         rewrite eval_subst.
+         eapply closed_eval' with (level_tm := 1)(vval := (n, bot_vval))(pval := bot_pval); simpl; [| | eauto | eauto].
+         { destruct n1; simpl; try lia.
+           intros _; rewrite eval_nth; auto. }
+         lia.
+    + apply h; [| exact 0].
+      intros.
+      exists n.
+      rewrite eval_ren in H; asimpl in *; auto.
+  - destruct H.
+    pose (x_syn := n_tm x).
     apply ex_intro with (t := x_syn).
     apply cpltInst.
     intro; intros.
-    Check eval_subst.
-    apply eval_subst.
-    simpl.
-    asimpl.
+    apply eval_subst; simpl; asimpl.
     eapply closed_eval' with (level_tm := 1)(vval := (x, bot_vval))(pval := bot_pval); [| | eauto | auto].
     + destruct n; simpl; [ | lia].
       intros _.
@@ -743,20 +762,6 @@ Proof.
   induction t; simpl; auto; intros ?; unfold is_true; repeat rewrite Bool.andb_true_iff; intros (h1 & h2); split; try apply IHt1; try apply IHt2; auto.
 Qed.
 
-Instance leq_complete t u : closed_tm 0 t -> closed_tm 0 u -> complete nil (t ≤ u).
-Proof.
-  intros; unfold ha_leq.
-  eapply ex_complete.
-  simpl; unfold is_true in *; repeat rewrite Bool.andb_true_iff.
-  repeat split; apply lift_closed; auto.
-  Unshelve.
-  intros; asimpl.
-  apply complete_eq; auto.
-  simpl; unfold is_true; rewrite Bool.andb_true_iff; split; auto.
-  apply closed_n_tm; auto.
-Qed.
-
-
 (* Let's prove that the connectors are correctly reflected in the model *)
 Theorem models_eq : forall t u vval pval, eval_prop pval vval (t ≃ u) <-> eval_tm vval t = eval_tm vval u.
 Proof.
@@ -764,6 +769,83 @@ Proof.
   intros; split; [| intro e; rewrite e; now auto] .
   intro h; assert (h := h (fun x => (eval_tm vval t) = x)).
   simpl in h; auto.
+Qed.
+
+Theorem models_bot : forall vval pval, eval_prop pval vval ⊥ <-> False.
+Proof.
+  intros; simpl.
+  intuition.
+  apply H; exact 0.
+Qed.
+
+Theorem models_imp : forall P Q vval pval, eval_prop pval vval (P ⇒ Q) <-> (eval_prop pval vval P -> eval_prop pval vval Q).
+Proof.
+  simpl; intuition.
+Qed.
+
+Theorem models_neg : forall P vval pval, eval_prop pval vval (P ⇒ ⊥) <-> ~ (eval_prop pval vval P).
+Proof.
+  intros.
+  assert (h := models_imp P ⊥ vval pval).
+  rewrite models_bot in h.
+  unfold "~".
+  exact h.
+Qed.
+
+Theorem models_neq : forall t u vval pval, eval_prop pval vval (t ≄ u) <-> eval_tm vval t <> eval_tm vval u.
+Proof.
+  intros.
+  rewrite models_neg.
+  rewrite models_eq; reflexivity.
+Qed.
+  
+
+Lemma subst_eq : forall t u v ξ, (t ≃ u)[v..; ξ] = (t[v..] ≃ u[v..]).
+Proof.
+  intros.
+  asimpl; auto.
+Qed.
+
+Lemma ha_eq_dec : forall t u, closed_tm 0 t -> closed_tm 0 u -> ha_dec (t ≃ u).
+Proof.
+  intros; unfold ha_dec, models.
+  Search ( { _ = _ } + { _ <> _ }).
+  destruct (Nat.eq_dec (eval_tm bot_vval t) (eval_tm bot_vval u)).
+  - left.
+    intros; rewrite models_eq.
+    rewrite closed_eval_tm with (level := 0)(vval' := bot_vval);
+    [| lia | auto].
+    rewrite e.
+    eapply closed_eval_tm; eauto; lia.
+  - right; intro; intros.
+    apply n.
+    eapply H1; [apply val_nil |].
+    simpl; auto.
+Qed.
+
+Instance leq_complete t u : closed_tm 0 t -> closed_tm 0 u -> complete (t ≤ u).
+Proof.
+  intros; unfold ha_leq.
+  eapply ex_complete.
+  - intros n; repeat rewrite ren_closed; auto.
+    rewrite subst_eq.
+    asimpl; repeat rewrite subst_closed; auto.
+    apply ha_eq_dec; auto.
+    simpl; unfold is_true; rewrite Bool.andb_true_iff.
+    split; auto.
+    apply closed_n_tm.
+  - simpl; unfold is_true in *; repeat rewrite Bool.andb_true_iff.
+    repeat split; apply lift_closed; auto.
+    Unshelve.
+    intros; asimpl.
+    apply complete_eq; auto.
+    simpl; unfold is_true; rewrite Bool.andb_true_iff; split; auto.
+    apply closed_n_tm; auto.
+Qed.
+
+Instance complete_prf P : nil ⊢ P -> complete P.
+Proof.
+  intros; constructor; intros; auto.
 Qed.
 
 Theorem models_exists : forall P vval pval, eval_prop pval vval (∃ P) <-> exists n, eval_prop pval (n, vval) P.
@@ -796,11 +878,6 @@ Proof.
     lia.
 Qed.
 
-Theorem models_imp : forall P Q vval pval, eval_prop pval vval (P ⇒ Q) <-> (eval_prop pval vval P -> eval_prop pval vval Q).
-Proof.
-  simpl; intuition.
-Qed.
-
 Theorem models_and : forall P Q vval pval, eval_prop pval vval (P ∧ Q) <-> eval_prop pval vval P /\ eval_prop pval vval Q.
 Proof.
   intros; unfold "∧"; simpl.
@@ -823,20 +900,4 @@ Proof.
   - destruct h; intros Pr; repeat rewrite eval_ren; asimpl; intros H1 H2.
     + apply H1; auto.
     + apply H2; auto.
-Qed.
-
-Theorem models_bot : forall vval pval, eval_prop pval vval ⊥ <-> False.
-Proof.
-  intros; simpl.
-  intuition.
-  apply H; exact 0.
-Qed.
-
-Theorem models_neg : forall P vval pval, eval_prop pval vval (P ⇒ ⊥) <-> ~ (eval_prop pval vval P).
-Proof.
-  intros.
-  assert (h := models_imp P ⊥ vval pval).
-  rewrite models_bot in h.
-  unfold "~".
-  exact h.
 Qed.
